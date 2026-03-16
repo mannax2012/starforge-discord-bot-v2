@@ -40,7 +40,7 @@ module.exports = {
     serverStatus: {
         enabled: env('SERVER_STATUS_ENABLED', 'true').toLowerCase() !== 'false',
         host: env('SERVER_STATUS_HOST', '127.0.0.1'),
-        port: envInt('SERVER_STATUS_PORT', 44455),
+        port: envInt('SERVER_STATUS_PORT', 44465),
         timeoutMs: envInt('SERVER_STATUS_TIMEOUT_MS', 5000),
         intervalMs: envInt('SERVER_STATUS_INTERVAL_MS', 15000),
         outputPath: env('SERVER_STATUS_OUTPUT_PATH', '/var/www/html/website/server_status.json'),
