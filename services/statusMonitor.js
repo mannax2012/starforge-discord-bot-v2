@@ -3,6 +3,8 @@ const path = require('path');
 const net = require('net');
 const config = require('../config');
 
+const FAILURE_THRESHOLD = 3;
+
 function ensureDirectoryForFile(filePath) {
     const dir = path.dirname(filePath);
     fs.mkdirSync(dir, { recursive: true });
@@ -95,6 +97,7 @@ function probeServerOnce() {
     return new Promise((resolve) => {
         const chunks = [];
         let finished = false;
+        let connected = false;
 
         const socket = net.createConnection({
             host: config.serverStatus.host,
@@ -120,7 +123,7 @@ function probeServerOnce() {
         socket.setTimeout(config.serverStatus.timeoutMs);
 
         socket.on('connect', () => {
-            socket.write('\n');
+            connected = true;
         });
 
         socket.on('data', (chunk) => {
@@ -131,38 +134,43 @@ function probeServerOnce() {
             const raw = Buffer.concat(chunks).toString('utf8');
 
             if (raw.trim() !== '') {
-                const parsed = parseStatusXml(raw);
-                finish(parsed);
+                finish(parseStatusXml(raw));
                 return;
             }
 
             finish({
-                status: 'down',
+                status: connected ? 'up' : 'down',
                 connectedUsers: 0,
-                probeError: 'Socket read timed out'
+                probeError: connected
+                    ? 'Connected, but socket timed out without readable XML'
+                    : 'Socket read timed out'
             });
         });
 
         socket.on('end', () => {
             const raw = Buffer.concat(chunks).toString('utf8');
 
-            if (raw.trim() === '') {
-                finish({
-                    status: 'down',
-                    connectedUsers: 0,
-                    probeError: 'Empty socket response'
-                });
+            if (raw.trim() !== '') {
+                finish(parseStatusXml(raw));
                 return;
             }
 
-            finish(parseStatusXml(raw));
+            finish({
+                status: connected ? 'up' : 'down',
+                connectedUsers: 0,
+                probeError: connected
+                    ? 'Connected, but server closed without readable XML'
+                    : 'Empty socket response'
+            });
         });
 
         socket.on('error', (error) => {
             finish({
-                status: 'down',
+                status: connected ? 'up' : 'down',
                 connectedUsers: 0,
-                probeError: `Socket probe failed: ${error.message}`
+                probeError: connected
+                    ? `Connected, then socket error occurred: ${error.message}`
+                    : `Socket probe failed: ${error.message}`
             });
         });
     });
@@ -175,20 +183,30 @@ async function runStatusUpdate() {
     const state = loadJson(statePath, {
         previousStatus: 'down',
         serverStartTime: 0,
-        maxConnectedUsers: 0
+        maxConnectedUsers: 0,
+        lastGoodConnectedUsers: 0,
+        consecutiveFailures: 0
     });
 
     const probe = await probeServerOnce();
     const now = Math.floor(Date.now() / 1000);
 
+    let previousStatus = String(state.previousStatus || 'down');
     let serverStartTime = Number.parseInt(state.serverStartTime, 10) || 0;
     let maxConnectedUsers = Number.parseInt(state.maxConnectedUsers, 10) || 0;
-    const previousStatus = String(state.previousStatus || 'down');
+    let lastGoodConnectedUsers = Number.parseInt(state.lastGoodConnectedUsers, 10) || 0;
+    let consecutiveFailures = Number.parseInt(state.consecutiveFailures, 10) || 0;
 
-    let connectedUsers = Number.parseInt(probe.connectedUsers, 10) || 0;
-    const status = probe.status === 'up' ? 'up' : 'down';
+    let status = 'down';
+    let connectedUsers = 0;
+    let probeError = probe.probeError || '';
 
-    if (status === 'up') {
+    if (probe.status === 'up') {
+        status = 'up';
+        connectedUsers = Number.parseInt(probe.connectedUsers, 10) || 0;
+        consecutiveFailures = 0;
+        lastGoodConnectedUsers = connectedUsers;
+
         if (previousStatus !== 'up' || serverStartTime <= 0) {
             serverStartTime = now;
         }
@@ -197,8 +215,16 @@ async function runStatusUpdate() {
             maxConnectedUsers = connectedUsers;
         }
     } else {
-        connectedUsers = 0;
-        serverStartTime = 0;
+        consecutiveFailures += 1;
+
+        if (previousStatus === 'up' && consecutiveFailures < FAILURE_THRESHOLD) {
+            status = 'up';
+            connectedUsers = lastGoodConnectedUsers;
+        } else {
+            status = 'down';
+            connectedUsers = 0;
+            serverStartTime = 0;
+        }
     }
 
     const output = {
@@ -207,17 +233,24 @@ async function runStatusUpdate() {
         maxConnectedUsers,
         serverStartTime,
         lastChecked: now,
-        probeError: probe.probeError || ''
+        probeError,
+        consecutiveFailures
     };
 
     writeJsonAtomic(outputPath, output);
     writeJsonAtomic(statePath, {
         previousStatus: status,
         serverStartTime,
-        maxConnectedUsers
+        maxConnectedUsers,
+        lastGoodConnectedUsers,
+        consecutiveFailures
     });
 
-    return output;
+    return {
+        output,
+        outputPath,
+        statePath
+    };
 }
 
 function startStatusMonitor() {
@@ -225,6 +258,12 @@ function startStatusMonitor() {
         console.log('Server status monitor disabled.');
         return;
     }
+
+    const resolvedOutputPath = path.resolve(config.serverStatus.outputPath);
+    const resolvedStatePath = path.resolve(config.serverStatus.statePath);
+
+    console.log(`Status output path: ${resolvedOutputPath}`);
+    console.log(`Status state path: ${resolvedStatePath}`);
 
     let running = false;
 
@@ -237,9 +276,20 @@ function startStatusMonitor() {
 
         try {
             const result = await runStatusUpdate();
-            console.log(
-                `Status updated: ${result.status} | players=${result.connectedUsers} | max=${result.maxConnectedUsers}`
-            );
+            let line =
+                `Status updated: ${result.output.status} | players=${result.output.connectedUsers} | max=${result.output.maxConnectedUsers}`;
+
+            if (result.output.consecutiveFailures > 0) {
+                line += ` | failures=${result.output.consecutiveFailures}`;
+            }
+
+            if (result.output.probeError) {
+                line += ` | probeError=${result.output.probeError}`;
+            }
+
+            line += ` | file=${result.outputPath}`;
+
+            console.log(line);
         } catch (error) {
             console.error('Status update failed:', error);
         } finally {
@@ -260,7 +310,8 @@ function readCurrentStatus() {
         maxConnectedUsers: 0,
         serverStartTime: 0,
         lastChecked: 0,
-        probeError: 'Status file missing'
+        probeError: 'Status file missing',
+        consecutiveFailures: 0
     });
 }
 

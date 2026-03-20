@@ -4,6 +4,7 @@ const { logToBotChannel } = require('../services/logging');
 const { dmUserPrompt } = require('../utils/promptHelper');
 const registrationMap = require('../utils/registrationMap');
 const { userHasPlayerRole } = require('../utils/roleCheck');
+const { postActivationReview } = require('../services/activationReview');
 
 function isValidEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -52,17 +53,14 @@ module.exports = {
             registrationMap.set(result.username, message.author.id);
             await message.author.send(`✅ Your account **${result.username}** has been registered. An admin will review and activate it soon.`);
 
-            if (config.accountReviewChannelId) {
-                const adminChannel = await client.channels.fetch(config.accountReviewChannelId);
-                if (adminChannel && adminChannel.isTextBased()) {
-                    await adminChannel.send(
-                        `📥 New registration received:
-👤 Username: \`${result.username}\`
-📧 Email: ${email}
-🆔 Discord: <@${message.author.id}>`
-                    );
-                }
-            }
+            await postActivationReview(client, {
+                username: result.username,
+                email: email,
+                discordUserId: message.author.id,
+                requestedBy: message.author.tag,
+                source: 'discord_register'
+            });
+            
         } catch (error) {
             console.error('Register command failed:', error);
             await logToBotChannel(client, `❌ Registration flow failed for ${message.author.tag}: ${error.message}`);

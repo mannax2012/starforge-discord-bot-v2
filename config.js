@@ -31,20 +31,20 @@ module.exports = {
     downloadUrl: env('DOWNLOAD_URL', 'https://www.dropbox.com/scl/fi/16mr43e42i7onbvmvcy1k/SWG-StarforgeInstaller.exe?rlkey=9lyr7jkiaj5nfzpchgu65sety&st=fixgflf9&dl=1'),
 
     webListener: {
-        enabled: env('WEB_LISTENER_ENABLED', 'false').toLowerCase() === 'true',
-        port: envInt('WEB_LISTENER_PORT', 3000),
+        enabled: env('WEB_LISTENER_ENABLED', 'true').toLowerCase() === 'true',
+        port: envInt('WEB_LISTENER_PORT', 44467),
         path: env('WEB_LISTENER_PATH', '/notify'),
         sharedSecret: env('WEBHOOK_SHARED_SECRET')
     },
 
     serverStatus: {
-        enabled: env('SERVER_STATUS_ENABLED', 'true').toLowerCase() !== 'false',
-        host: env('SERVER_STATUS_HOST', '127.0.0.1'),
-        port: envInt('SERVER_STATUS_PORT', 44465),
-        timeoutMs: envInt('SERVER_STATUS_TIMEOUT_MS', 5000),
-        intervalMs: envInt('SERVER_STATUS_INTERVAL_MS', 15000),
-        outputPath: env('SERVER_STATUS_OUTPUT_PATH', '/var/www/html/website/server_status.json'),
-        statePath: env('SERVER_STATUS_STATE_PATH', './data/server_status_state.json')
+        enabled: true,
+        host: '15.204.89.4',
+        port: 44465,
+        timeoutMs: 7000,
+        intervalMs: 30000,
+        outputPath: 'D:\\xampp\\htdocs\\website\\server_status.json',
+        statePath: './data/server_status_state.json'
     },
 
     db: {
