@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
 const config = require('./config');
+const { startWebApi } = require('./web-api');
 
 if (!config.token) {
     throw new Error('DISCORD_TOKEN is missing. Set it in your .env file.');
@@ -45,4 +46,5 @@ for (const file of fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'
     }
 }
 
+startWebApi(client);
 client.login(config.token);
