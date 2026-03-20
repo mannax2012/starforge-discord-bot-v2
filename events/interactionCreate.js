@@ -1,6 +1,6 @@
 const { Events } = require('discord.js');
 const config = require('../config');
-const { activateAccountByUsername } = require('../services/accountActivation');
+const { activateAccountByUsername } = require('../services/accountService');
 const { logToBotChannel } = require('../services/logging');
 
 function hasActivationPermission(member) {

@@ -1,13 +1,12 @@
-const config = require('../config');
 const { registerUser } = require('../services/registerAccount');
+const { postActivationReview } = require('../services/activationReview');
 const { logToBotChannel } = require('../services/logging');
 const { dmUserPrompt } = require('../utils/promptHelper');
 const registrationMap = require('../utils/registrationMap');
 const { userHasPlayerRole } = require('../utils/roleCheck');
-const { postActivationReview } = require('../services/activationReview');
 
 function isValidEmail(email) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
 }
 
 module.exports = {
@@ -50,17 +49,27 @@ module.exports = {
                 return message.author.send(`❌ Registration failed: ${result.message || 'Please try again later.'}`);
             }
 
-            registrationMap.set(result.username, message.author.id);
-            await message.author.send(`✅ Your account **${result.username}** has been registered. An admin will review and activate it soon.`);
-
-            await postActivationReview(client, {
+            const reviewResult = await postActivationReview(client, {
                 username: result.username,
-                email: email,
+                email: result.email,
+                stationId: result.stationId || '',
                 discordUserId: message.author.id,
                 requestedBy: message.author.tag,
                 source: 'discord_register'
             });
-            
+
+            if (!reviewResult.success) {
+                await logToBotChannel(
+                    client,
+                    `⚠️ Account \`${result.username}\` was registered through Discord, but the activation review post failed.`
+                );
+            }
+
+            registrationMap.set(result.username, message.author.id);
+
+            await message.author.send(
+                `✅ Your account **${result.username}** has been registered. An admin will review and activate it soon.`
+            );
         } catch (error) {
             console.error('Register command failed:', error);
             await logToBotChannel(client, `❌ Registration flow failed for ${message.author.tag}: ${error.message}`);

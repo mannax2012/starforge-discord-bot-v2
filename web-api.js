@@ -3,6 +3,13 @@ const config = require('./config');
 const { verifyLogin } = require('./services/accountAuth');
 const { registerUser } = require('./services/registerAccount');
 const { postActivationReview } = require('./services/activationReview');
+const {
+    getAccountProfile,
+    changeEmail,
+    changePassword,
+    adminResetPassword,
+    activateAccountByUsername
+} = require('./services/accountService');
 const { logToBotChannel } = require('./services/logging');
 
 function requireSharedSecret(req, res, next) {
@@ -27,7 +34,7 @@ function requireSharedSecret(req, res, next) {
 }
 
 function startWebApi(client) {
-    if (!config.webListener.enabled) {
+    if (!config.webListener || !config.webListener.enabled) {
         console.log('Starforge Web API is disabled.');
         return;
     }
@@ -52,7 +59,7 @@ function startWebApi(client) {
 
             const result = await verifyLogin(username, password);
 
-            res.status(result.statusCode || (result.success ? 200 : 400)).json({
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
                 success: result.success,
                 message: result.message,
                 data: result.data || null
@@ -60,7 +67,7 @@ function startWebApi(client) {
         } catch (error) {
             console.error('API login error:', error);
 
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: 'Internal authentication error.'
             });
@@ -76,7 +83,7 @@ function startWebApi(client) {
             const result = await registerUser(username, password, email, client, null);
 
             if (!result.success) {
-                return res.status(400).json({
+                return res.status(result.statusCode || 400).json({
                     success: false,
                     message: result.message,
                     data: null
@@ -87,7 +94,8 @@ function startWebApi(client) {
                 username: result.username,
                 email: result.email,
                 requestedBy: result.username,
-                source: 'website_register'
+                source: 'website_register',
+                stationId: result.stationId || ''
             });
 
             if (!reviewResult.success) {
@@ -134,7 +142,120 @@ function startWebApi(client) {
         }
     });
 
-    const host = '127.0.0.1';
+    app.post('/api/account/profile', requireSharedSecret, async function (req, res) {
+        try {
+            const username = req.body ? req.body.username : '';
+            const result = await getAccountProfile(username);
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('API account profile error:', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal account profile error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/account/change-email', requireSharedSecret, async function (req, res) {
+        try {
+            const username = req.body ? req.body.username : '';
+            const email = req.body ? req.body.email : '';
+
+            const result = await changeEmail(username, email);
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('API change-email error:', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal email update error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/account/change-password', requireSharedSecret, async function (req, res) {
+        try {
+            const username = req.body ? req.body.username : '';
+            const currentPassword = req.body ? req.body.currentPassword : '';
+            const newPassword = req.body ? req.body.newPassword : '';
+
+            const result = await changePassword(username, currentPassword, newPassword);
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('API change-password error:', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal password update error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/admin/reset-password', requireSharedSecret, async function (req, res) {
+        try {
+            const username = req.body ? req.body.username : '';
+            const newPassword = req.body ? req.body.newPassword : '';
+
+            const result = await adminResetPassword(username, newPassword);
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('API admin reset-password error:', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal admin password reset error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/admin/activate-account', requireSharedSecret, async function (req, res) {
+        try {
+            const username = req.body ? req.body.username : '';
+
+            const result = await activateAccountByUsername(username);
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('API admin activate-account error:', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal account activation error.',
+                data: null
+            });
+        }
+    });
+
+    const host = '0.0.0.0';
     const port = config.webListener.port;
 
     app.listen(port, host, async function () {

@@ -39,11 +39,11 @@ module.exports = {
 
     serverStatus: {
         enabled: true,
-        host: '15.204.89.4',
+        host: '127.0.0.1',
         port: 44465,
         timeoutMs: 7000,
         intervalMs: 30000,
-        outputPath: 'D:\\xampp\\htdocs\\website\\server_status.json',
+        outputPath: '/var/www/html/website/server_status.json',
         statePath: './data/server_status_state.json'
     },
 
