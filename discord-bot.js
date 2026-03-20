@@ -45,5 +45,4 @@ for (const file of fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'
     }
 }
 
-startWebApi(client);
 client.login(config.token);

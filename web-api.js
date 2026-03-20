@@ -32,12 +32,20 @@ function requireSharedSecret(req, res, next) {
 
     next();
 }
+let apiStarted = false;
 
 function startWebApi(client) {
+    if (apiStarted) {
+        console.log('Starforge Web API already started. Skipping duplicate start.');
+        return;
+    }
+
     if (!config.webListener || !config.webListener.enabled) {
         console.log('Starforge Web API is disabled.');
         return;
     }
+
+    apiStarted = true;
 
     const app = express();
 
