@@ -10,6 +10,7 @@ const {
     adminResetPassword,
     activateAccountByUsername
 } = require('./services/accountService');
+const { readCurrentStatus } = require('./services/statusMonitor');
 const { logToBotChannel } = require('./services/logging');
 
 function requireSharedSecret(req, res, next) {
@@ -60,6 +61,44 @@ function startWebApi(client) {
         });
     });
 
+    app.get('/api/status/current', requireSharedSecret, function (req, res) {
+        try {
+            const status = readCurrentStatus();
+            return res.status(200).json(status);
+        } catch (error) {
+            console.error('API status current error:', error);
+
+            return res.status(500).json({
+                schemaVersion: 3,
+                generatedAt: new Date().toISOString(),
+                serverName: 'Starforge',
+                status: 'down',
+                statusLabel: 'OFFLINE',
+                connectedUsers: 0,
+                playerCap: 0,
+                peakPlayers: 0,
+                maxConnectedUsers: 0,
+                serverStartTime: 0,
+                uptimeSeconds: 0,
+                lastChecked: 0,
+                lastSuccessAt: 0,
+                probeError: 'Unable to load current status from monitor.',
+                transportWarning: '',
+                consecutiveFailures: 0,
+                users: {
+                    connected: 0,
+                    cap: 0,
+                    peak: 0,
+                    total: 0,
+                    deleted: 0,
+                    highWater: 0
+                },
+                summary: null,
+                xml: null,
+                rawXml: ''
+            });
+        }
+    });
     app.post('/api/auth/login', requireSharedSecret, async function (req, res) {
         try {
             const username = req.body ? req.body.username : '';
