@@ -226,104 +226,8 @@ function parseXmlToObject(xml) {
     return result;
 }
 
-function normalizeKey(key) {
-    return String(key || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '');
-}
-
 function isPlainObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isScalar(value) {
-    return (
-        typeof value === 'string' ||
-        typeof value === 'number' ||
-        typeof value === 'boolean'
-    );
-}
-
-function getDirectScalarByKeys(obj, keys) {
-    if (!isPlainObject(obj)) {
-        return '';
-    }
-
-    const wanted = keys.map(normalizeKey);
-
-    for (const key of Object.keys(obj)) {
-        if (wanted.includes(normalizeKey(key)) && isScalar(obj[key])) {
-            return String(obj[key]).trim();
-        }
-    }
-
-    return '';
-}
-
-function findNestedScalarByKeys(value, keys) {
-    const wanted = keys.map(normalizeKey);
-
-    if (Array.isArray(value)) {
-        for (const item of value) {
-            const found = findNestedScalarByKeys(item, keys);
-            if (found !== '') {
-                return found;
-            }
-        }
-        return '';
-    }
-
-    if (!isPlainObject(value)) {
-        return '';
-    }
-
-    for (const key of Object.keys(value)) {
-        if (wanted.includes(normalizeKey(key)) && isScalar(value[key])) {
-            return String(value[key]).trim();
-        }
-    }
-
-    for (const key of Object.keys(value)) {
-        const found = findNestedScalarByKeys(value[key], keys);
-        if (found !== '') {
-            return found;
-        }
-    }
-
-    return '';
-}
-
-function findNestedObjectByKeys(value, keys) {
-    const wanted = keys.map(normalizeKey);
-
-    if (Array.isArray(value)) {
-        for (const item of value) {
-            const found = findNestedObjectByKeys(item, keys);
-            if (found) {
-                return found;
-            }
-        }
-        return null;
-    }
-
-    if (!isPlainObject(value)) {
-        return null;
-    }
-
-    for (const key of Object.keys(value)) {
-        if (wanted.includes(normalizeKey(key)) && isPlainObject(value[key])) {
-            return value[key];
-        }
-    }
-
-    for (const key of Object.keys(value)) {
-        const found = findNestedObjectByKeys(value[key], keys);
-        if (found) {
-            return found;
-        }
-    }
-
-    return null;
 }
 
 function toInt(value, fallback) {
@@ -331,56 +235,46 @@ function toInt(value, fallback) {
     return Number.isNaN(parsed) ? (fallback || 0) : parsed;
 }
 
+function getZoneServerNode(parsedXml) {
+    if (!parsedXml || !isPlainObject(parsedXml)) {
+        return null;
+    }
+
+    if (isPlainObject(parsedXml.zoneServer)) {
+        return parsedXml.zoneServer;
+    }
+
+    return null;
+}
+
 function summarizeParsedXml(parsedXml) {
-    const usersNode = findNestedObjectByKeys(parsedXml, ['users', 'population', 'players']);
+    const zoneServer = getZoneServerNode(parsedXml) || {};
+    const users = isPlainObject(zoneServer.users) ? zoneServer.users : {};
 
-    const connectedUsers = toInt(
-        getDirectScalarByKeys(usersNode, ['connected', 'current', 'online']) ||
-        findNestedScalarByKeys(parsedXml, ['connectedusers', 'onlinecount', 'currentusers', 'connected']),
-        0
-    );
+    const serverName = String(zoneServer.name || '').trim() || DEFAULT_SERVER_NAME;
+    const status = normalizeStatus(zoneServer.status || 'up', 'up');
 
-    const advertisedMaxPlayers = toInt(
-        getDirectScalarByKeys(usersNode, ['max', 'maximum', 'capacity', 'maxconnected']) ||
-        findNestedScalarByKeys(parsedXml, ['maxusers', 'maxconnectedusers', 'capacity']),
-        0
-    );
-
-    const explicitServerStartTime = toInt(
-        findNestedScalarByKeys(parsedXml, ['serverstarttime', 'starttime', 'boottime', 'startedat']),
-        0
-    );
-
-    const explicitUptimeSeconds = toInt(
-        findNestedScalarByKeys(parsedXml, ['uptime', 'uptimeseconds', 'elapsed']),
-        0
-    );
-
-    const serverName =
-        findNestedScalarByKeys(parsedXml, ['servername', 'server_name', 'name']) ||
-        '';
-
-    const motd =
-        findNestedScalarByKeys(parsedXml, ['motd', 'messageoftheday']) ||
-        '';
-
-    const version =
-        findNestedScalarByKeys(parsedXml, ['version', 'build']) ||
-        '';
-
-    const statusCandidate =
-        findNestedScalarByKeys(parsedXml, ['status', 'serverstatus']) ||
-        'up';
+    const connectedUsers = toInt(users.connected, 0);
+    const playerCap = toInt(users.cap, 0);
+    const peakPlayers = toInt(users.max, 0);
+    const totalPlayers = toInt(users.total, 0);
+    const deletedPlayers = toInt(users.deleted, 0);
+    const explicitUptimeSeconds = toInt(zoneServer.uptime, 0);
+    const timestampMs = toInt(zoneServer.timestamp, 0);
 
     return {
-        status: normalizeStatus(statusCandidate, 'up'),
-        serverName: serverName || DEFAULT_SERVER_NAME,
+        status,
+        serverName,
         connectedUsers,
-        advertisedMaxPlayers,
-        explicitServerStartTime,
+        playerCap,
+        peakPlayers,
+        totalPlayers,
+        deletedPlayers,
+        explicitServerStartTime: 0,
         explicitUptimeSeconds,
-        motd,
-        version
+        timestampMs,
+        motd: '',
+        version: ''
     };
 }
 
@@ -396,7 +290,8 @@ function parseStatusXml(rawXml) {
             rawXml: '',
             xml: null,
             summary: null,
-            probeError: 'No XML found in socket response'
+            probeError: 'No XML found in socket response',
+            transportWarning: ''
         };
     }
 
@@ -413,7 +308,8 @@ function parseStatusXml(rawXml) {
             rawXml: cleanXml,
             xml: parsedXml,
             summary,
-            probeError: ''
+            probeError: '',
+            transportWarning: ''
         };
     } catch (error) {
         return {
@@ -423,9 +319,25 @@ function parseStatusXml(rawXml) {
             rawXml: cleanXml,
             xml: null,
             summary: null,
-            probeError: 'XML parse failed: ' + error.message
+            probeError: 'XML parse failed: ' + error.message,
+            transportWarning: ''
         };
     }
+}
+
+function parseIfAnyData(raw, warningText) {
+    if (String(raw || '').trim() === '') {
+        return null;
+    }
+
+    const parsed = parseStatusXml(raw);
+
+    if (parsed.summary) {
+        parsed.transportWarning = warningText || '';
+        parsed.probeError = '';
+    }
+
+    return parsed;
 }
 
 function probeServerOnce() {
@@ -467,9 +379,13 @@ function probeServerOnce() {
 
         socket.on('timeout', () => {
             const raw = Buffer.concat(chunks).toString('utf8');
+            const parsed = parseIfAnyData(
+                raw,
+                connected ? 'Socket timed out after XML was received.' : ''
+            );
 
-            if (raw.trim() !== '') {
-                finish(parseStatusXml(raw));
+            if (parsed) {
+                finish(parsed);
                 return;
             }
 
@@ -482,15 +398,20 @@ function probeServerOnce() {
                 summary: null,
                 probeError: connected
                     ? 'Connected, but socket timed out without readable XML'
-                    : 'Socket read timed out'
+                    : 'Socket read timed out',
+                transportWarning: ''
             });
         });
 
         socket.on('end', () => {
             const raw = Buffer.concat(chunks).toString('utf8');
+            const parsed = parseIfAnyData(
+                raw,
+                connected ? 'Socket closed after XML was received.' : ''
+            );
 
-            if (raw.trim() !== '') {
-                finish(parseStatusXml(raw));
+            if (parsed) {
+                finish(parsed);
                 return;
             }
 
@@ -503,11 +424,23 @@ function probeServerOnce() {
                 summary: null,
                 probeError: connected
                     ? 'Connected, but server closed without readable XML'
-                    : 'Empty socket response'
+                    : 'Empty socket response',
+                transportWarning: ''
             });
         });
 
         socket.on('error', (error) => {
+            const raw = Buffer.concat(chunks).toString('utf8');
+            const parsed = parseIfAnyData(
+                raw,
+                connected ? `Socket error after XML was received: ${error.message}` : ''
+            );
+
+            if (parsed) {
+                finish(parsed);
+                return;
+            }
+
             finish({
                 status: connected ? 'up' : 'down',
                 connectedUsers: 0,
@@ -517,7 +450,8 @@ function probeServerOnce() {
                 summary: null,
                 probeError: connected
                     ? `Connected, then socket error occurred: ${error.message}`
-                    : `Socket probe failed: ${error.message}`
+                    : `Socket probe failed: ${error.message}`,
+                transportWarning: ''
             });
         });
     });
@@ -550,10 +484,14 @@ async function runStatusUpdate() {
     let connectedUsers = 0;
     let serverName = DEFAULT_SERVER_NAME;
     let probeError = probe.probeError || '';
+    let transportWarning = probe.transportWarning || '';
     let xml = null;
     let rawXml = '';
     let summary = null;
-    let advertisedMaxPlayers = 0;
+    let playerCap = 0;
+    let peakPlayers = 0;
+    let totalPlayers = 0;
+    let deletedPlayers = 0;
 
     if (probe.status === 'up' && probe.summary) {
         status = 'up';
@@ -563,7 +501,10 @@ async function runStatusUpdate() {
         summary = probe.summary;
         xml = probe.xml;
         rawXml = probe.rawXml || '';
-        advertisedMaxPlayers = toInt(probe.summary.advertisedMaxPlayers, 0);
+        playerCap = toInt(probe.summary.playerCap, 0);
+        peakPlayers = toInt(probe.summary.peakPlayers, 0);
+        totalPlayers = toInt(probe.summary.totalPlayers, 0);
+        deletedPlayers = toInt(probe.summary.deletedPlayers, 0);
         lastSuccessAt = now;
 
         if (probe.summary.explicitServerStartTime > 0) {
@@ -581,7 +522,10 @@ async function runStatusUpdate() {
         lastGoodSnapshot = {
             serverName,
             connectedUsers,
-            advertisedMaxPlayers,
+            playerCap,
+            peakPlayers,
+            totalPlayers,
+            deletedPlayers,
             summary,
             xml,
             rawXml
@@ -596,7 +540,10 @@ async function runStatusUpdate() {
             summary = lastGoodSnapshot.summary || null;
             xml = lastGoodSnapshot.xml || null;
             rawXml = lastGoodSnapshot.rawXml || '';
-            advertisedMaxPlayers = toInt(lastGoodSnapshot.advertisedMaxPlayers, 0);
+            playerCap = toInt(lastGoodSnapshot.playerCap, 0);
+            peakPlayers = toInt(lastGoodSnapshot.peakPlayers, 0);
+            totalPlayers = toInt(lastGoodSnapshot.totalPlayers, 0);
+            deletedPlayers = toInt(lastGoodSnapshot.deletedPlayers, 0);
         } else {
             status = 'down';
             connectedUsers = 0;
@@ -604,7 +551,10 @@ async function runStatusUpdate() {
             summary = null;
             xml = null;
             rawXml = '';
-            advertisedMaxPlayers = 0;
+            playerCap = 0;
+            peakPlayers = 0;
+            totalPlayers = 0;
+            deletedPlayers = 0;
         }
     }
 
@@ -613,7 +563,7 @@ async function runStatusUpdate() {
         : 0;
 
     const output = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         generatedAt: new Date().toISOString(),
         source: {
             type: 'tcp-xml',
@@ -625,25 +575,35 @@ async function runStatusUpdate() {
         status,
         statusLabel: status === 'up' ? 'ONLINE' : 'OFFLINE',
         connectedUsers,
+        playerCap,
+        peakPlayers,
         maxConnectedUsers,
         serverStartTime,
         uptimeSeconds,
         lastChecked: now,
         lastSuccessAt,
         probeError,
+        transportWarning,
         consecutiveFailures,
         users: {
             connected: connectedUsers,
-            max: advertisedMaxPlayers,
+            cap: playerCap,
+            peak: peakPlayers,
+            total: totalPlayers,
+            deleted: deletedPlayers,
             highWater: maxConnectedUsers
         },
         summary: summary || {
             status,
             serverName,
             connectedUsers,
-            advertisedMaxPlayers: 0,
+            playerCap: 0,
+            peakPlayers: 0,
+            totalPlayers: 0,
+            deletedPlayers: 0,
             explicitServerStartTime: 0,
             explicitUptimeSeconds: 0,
+            timestampMs: 0,
             motd: '',
             version: ''
         },
@@ -692,19 +652,24 @@ function startStatusMonitor() {
         try {
             const result = await runStatusUpdate();
             let line =
-                `Status updated: ${result.output.status} | ServerName=${result.output.serverName} | PlayersConnected=${result.output.connectedUsers} | MaxPlayers=${result.output.maxConnectedUsers}`;
+                `Status updated: ${result.output.status}` +
+                ` | ServerName=${result.output.serverName}` +
+                ` | PlayersConnected=${result.output.connectedUsers}` +
+                ` | PlayerCap=${result.output.playerCap}` +
+                ` | PeakPlayers=${result.output.peakPlayers}` +
+                ` | HighWater=${result.output.maxConnectedUsers}`;
 
-            if (result.output.users && result.output.users.max > 0) {
-                line += ` | MaxPlayers=${result.output.users.max}`;
+            if (result.output.consecutiveFailures > 0) {
+                line += ` | Failures=${result.output.consecutiveFailures}`;
             }
 
-           // if (result.output.consecutiveFailures > 0) {
-           //     line += ` | failures=${result.output.consecutiveFailures}`;
-           // }
+            if (result.output.transportWarning) {
+                line += ` | TransportWarning=${result.output.transportWarning}`;
+            }
 
-           // if (result.output.probeError) {
-           //     line += ` | probeError=${result.output.probeError}`;
-           // }
+            if (result.output.probeError) {
+                line += ` | ProbeError=${result.output.probeError}`;
+            }
 
             line += ` | file=${result.outputPath}`;
 
@@ -724,7 +689,7 @@ function readCurrentStatus() {
     const outputPath = path.resolve(config.serverStatus.outputPath);
 
     return loadJson(outputPath, {
-        schemaVersion: 2,
+        schemaVersion: 3,
         generatedAt: '',
         source: {
             type: 'tcp-xml',
@@ -736,16 +701,22 @@ function readCurrentStatus() {
         status: 'down',
         statusLabel: 'OFFLINE',
         connectedUsers: 0,
+        playerCap: 0,
+        peakPlayers: 0,
         maxConnectedUsers: 0,
         serverStartTime: 0,
         uptimeSeconds: 0,
         lastChecked: 0,
         lastSuccessAt: 0,
         probeError: 'Status file missing',
+        transportWarning: '',
         consecutiveFailures: 0,
         users: {
             connected: 0,
-            max: 0,
+            cap: 0,
+            peak: 0,
+            total: 0,
+            deleted: 0,
             highWater: 0
         },
         summary: null,
