@@ -20,6 +20,7 @@ const {
     cleanupExpiredSessions
 } = require('./services/launcherSessionService');
 const { createGameSessionForUser } = require('./services/gameSessionService');
+
 function requireSharedSecret(req, res, next) {
     const provided = String(req.get('X-Starforge-Key') || '').trim();
     const expected = String(config.webListener.sharedSecret || '').trim();
@@ -361,6 +362,7 @@ function startWebApi(client) {
             const clientName = req.body && req.body.clientName ? req.body.clientName : 'Starforge LaunchPad';
 
             const result = await verifyLogin(username, password);
+
             if (!result.success || !result.data) {
                 return res.status(result.statusCode || 401).json({
                     success: false,
@@ -407,6 +409,7 @@ function startWebApi(client) {
 
     app.post('/api/launcher/logout', requireLauncherSession, async function (req, res) {
         revokeSession(req.launcherAccessToken);
+
         return res.status(200).json({
             success: true,
             message: 'Launcher session closed.',
@@ -417,6 +420,7 @@ function startWebApi(client) {
     app.get('/api/launcher/me', requireLauncherSession, async function (req, res) {
         try {
             const result = await buildLauncherProfile(req.launcherSession.username);
+
             return res.status(result.statusCode || (result.success ? 200 : 400)).json({
                 success: result.success,
                 message: result.message,
@@ -480,6 +484,7 @@ function startWebApi(client) {
             const email = req.body ? req.body.email : '';
 
             const result = await registerUser(username, password, email, client, null);
+
             if (!result.success) {
                 return res.status(result.statusCode || 400).json({
                     success: false,
@@ -530,6 +535,7 @@ function startWebApi(client) {
     app.post('/api/launcher/request-activation', requireLauncherSession, async function (req, res) {
         try {
             const profileResult = await buildLauncherProfile(req.launcherSession.username);
+
             if (!profileResult.success || !profileResult.data) {
                 return res.status(profileResult.statusCode || 400).json({
                     success: false,
@@ -578,6 +584,36 @@ function startWebApi(client) {
             return res.status(500).json({
                 success: false,
                 message: 'Internal launcher activation request error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/launcher/game-session', requireLauncherSession, async function (req, res) {
+        try {
+            const forwardedFor = String(req.headers['x-forwarded-for'] || '').trim();
+            const requestIp =
+                forwardedFor.split(',')[0].trim() ||
+                req.socket.remoteAddress ||
+                req.ip ||
+                '';
+
+            const result = await createGameSessionForUser(
+                req.launcherSession.username,
+                requestIp
+            );
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('Launcher game-session error:', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal launcher game-session error.',
                 data: null
             });
         }
