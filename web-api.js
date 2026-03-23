@@ -19,7 +19,7 @@ const {
     parseBearerToken,
     cleanupExpiredSessions
 } = require('./services/launcherSessionService');
-
+const { createGameSessionForUser } = require('./services/gameSessionService');
 function requireSharedSecret(req, res, next) {
     const provided = String(req.get('X-Starforge-Key') || '').trim();
     const expected = String(config.webListener.sharedSecret || '').trim();
