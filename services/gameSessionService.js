@@ -2,15 +2,10 @@ const crypto = require('crypto');
 const pool = require('./database');
 const config = require('../config');
 
+const launcherConfig = config.launcher || {};
+
 function makeRawSessionId() {
     return crypto.randomBytes(32).toString('hex');
-}
-
-function makePasswordHash(password, salt) {
-    return crypto
-        .createHash('sha256')
-        .update(config.dbSecret + password + salt)
-        .digest('hex');
 }
 
 function pad2(value) {
@@ -29,7 +24,7 @@ function toMySqlDateTimeUtc(date) {
 }
 
 function getExpiryValues() {
-    const minutes = Number(config.launcher.GameSessionMinutes || 5);
+    const minutes = Number(launcherConfig.launcherGameSessionMinutes || 5);
     const expiresDate = new Date(Date.now() + (minutes * 60 * 1000));
 
     return {
@@ -39,15 +34,18 @@ function getExpiryValues() {
 }
 
 function getLaunchSettings(username, rawSessionId) {
-    const loginServerAddress = String(config.launcher.LoginServerAddress || 'login.swg-starforge.com').trim();
-    const loginServerPort = Number(config.launcher.LoginServerPort || 44553);
-    const subscriptionFeatures = Number(config.launcher.SubscriptionFeatures || 1);
-    const gameFeatures = Number(config.launcher.GameFeatures || 65535);
-    const allowMultipleInstances = Boolean(
-        config.launcher.AllowMultipleInstances === undefined
+    const loginServerAddress = String(
+        launcherConfig.launcherLoginServerAddress || 'login.swg-starforge.com'
+    ).trim();
+
+    const loginServerPort = Number(launcherConfig.launcherLoginServerPort || 44553);
+    const subscriptionFeatures = Number(launcherConfig.launcherSubscriptionFeatures || 1);
+    const gameFeatures = Number(launcherConfig.launcherGameFeatures || 65535);
+
+    const allowMultipleInstances =
+        launcherConfig.launcherAllowMultipleInstances === undefined
             ? true
-            : config.launcher.AllowMultipleInstances
-    );
+            : Boolean(launcherConfig.launcherAllowMultipleInstances);
 
     return {
         clientGame: {
@@ -66,6 +64,20 @@ function getLaunchSettings(username, rawSessionId) {
     };
 }
 
+function normalizeIpAddress(ipAddress) {
+    let safeIp = String(ipAddress || '').trim();
+
+    if (!safeIp) {
+        safeIp = '0.0.0.0';
+    }
+
+    if (safeIp.startsWith('::ffff:')) {
+        safeIp = safeIp.substring(7);
+    }
+
+    return safeIp;
+}
+
 async function createGameSessionForUser(username, ipAddress) {
     const normalizedUsername = String(username || '').trim();
 
@@ -77,16 +89,8 @@ async function createGameSessionForUser(username, ipAddress) {
         };
     }
 
-    if (!config.dbSecret) {
-        return {
-            success: false,
-            statusCode: 500,
-            message: 'DB secret is not configured on the Starforge API host.'
-        };
-    }
-
     const [accountRows] = await pool.execute(
-        `SELECT account_id, username, active, salt, station_id
+        `SELECT account_id, username, active, station_id
          FROM accounts
          WHERE username = ?
          LIMIT 1`,
@@ -112,25 +116,18 @@ async function createGameSessionForUser(username, ipAddress) {
     }
 
     const rawSessionId = makeRawSessionId();
-    const salt = String(account.salt || '');
-    const storedSessionId = makePasswordHash(rawSessionId, salt);
     const expiry = getExpiryValues();
+    const safeIp = normalizeIpAddress(ipAddress);
 
-    let safeIp = String(ipAddress || '').trim();
-    if (!safeIp) {
-        safeIp = '0.0.0.0';
-    }
-
-    if (safeIp.startsWith('::ffff:')) {
-        safeIp = safeIp.substring(7);
-    }
-
+    // IMPORTANT:
+    // For this test, store the RAW session token exactly as returned to the launcher.
+    // That keeps the bot -> launcher -> client -> server handoff identical.
     await pool.execute(
         `REPLACE INTO sessions (account_id, session_id, ip, expires)
          VALUES (?, ?, ?, ?)`,
         [
             Number(account.account_id),
-            storedSessionId,
+            rawSessionId,
             safeIp,
             expiry.expiresForMySql
         ]
@@ -147,7 +144,7 @@ async function createGameSessionForUser(username, ipAddress) {
             stationId: String(account.station_id || ''),
             accountId: Number(account.account_id || 0),
             sessionId: rawSessionId,
-            sessionIdStoredMode: 'saltedSha256',
+            sessionIdStoredMode: 'raw',
             expiresAtUtc: expiry.expiresAtUtcIso,
             clientGame: launchSettings.clientGame,
             station: launchSettings.station,
