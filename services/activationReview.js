@@ -11,10 +11,14 @@ function getSourceLabel(source) {
             return 'Website Registration';
         case 'discord_register':
             return 'Discord Registration';
+        case 'launcher_register':
+            return 'Launcher Registration';
         case 'website_resend':
             return 'Website Activation Request';
         case 'discord_resend':
             return 'Discord Activation Request';
+        case 'launcher_resend':
+            return 'Launcher Activation Request';
         default:
             return 'Activation Review';
     }
@@ -24,9 +28,11 @@ function getTitle(source) {
     switch (normalizeSource(source)) {
         case 'website_register':
         case 'discord_register':
+        case 'launcher_register':
             return 'New Account Awaiting Activation';
         case 'website_resend':
         case 'discord_resend':
+        case 'launcher_resend':
             return 'Activation Request Received';
         default:
             return 'Activation Approval Requested';
@@ -39,10 +45,14 @@ function getDescription(source, username) {
             return `Website registration for **${username}** is complete and waiting for staff activation.`;
         case 'discord_register':
             return `Discord registration for **${username}** is complete and waiting for staff activation.`;
+        case 'launcher_register':
+            return `Launcher registration for **${username}** is complete and waiting for staff activation.`;
         case 'website_resend':
             return `**${username}** requested another activation review from the website portal.`;
         case 'discord_resend':
             return `**${username}** requested another activation review from Discord.`;
+        case 'launcher_resend':
+            return `**${username}** requested another activation review from the launcher.`;
         default:
             return `Account **${username}** requires staff activation.`;
     }
