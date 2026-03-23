@@ -6,10 +6,29 @@ function makeSessionId() {
     return crypto.randomBytes(32).toString('hex');
 }
 
-function getExpiryTimestamp() {
-    const minutes = config.launcherGameSessionMinutes || 5;
-    const expires = new Date(Date.now() + (minutes * 60 * 1000));
-    return Math.floor(expires.getTime() / 1000);
+function pad2(value) {
+    return String(value).padStart(2, '0');
+}
+
+function toMySqlDateTimeUtc(date) {
+    return (
+        date.getUTCFullYear() + '-' +
+        pad2(date.getUTCMonth() + 1) + '-' +
+        pad2(date.getUTCDate()) + ' ' +
+        pad2(date.getUTCHours()) + ':' +
+        pad2(date.getUTCMinutes()) + ':' +
+        pad2(date.getUTCSeconds())
+    );
+}
+
+function getExpiryValues() {
+    const minutes = Number(config.launcherGameSessionMinutes || 5);
+    const expiresDate = new Date(Date.now() + (minutes * 60 * 1000));
+
+    return {
+        expiresAtUtcIso: expiresDate.toISOString(),
+        expiresForMySql: toMySqlDateTimeUtc(expiresDate)
+    };
 }
 
 async function createGameSessionForUser(username, ipAddress) {
@@ -50,8 +69,16 @@ async function createGameSessionForUser(username, ipAddress) {
     }
 
     const sessionId = makeSessionId();
-    const expires = getExpiryTimestamp();
-    const safeIp = String(ipAddress || '').trim() || '0.0.0.0';
+    const expiry = getExpiryValues();
+
+    let safeIp = String(ipAddress || '').trim();
+    if (!safeIp) {
+        safeIp = '0.0.0.0';
+    }
+
+    if (safeIp.startsWith('::ffff:')) {
+        safeIp = safeIp.substring(7);
+    }
 
     await pool.execute(
         `REPLACE INTO sessions (account_id, session_id, ip, expires)
@@ -60,7 +87,7 @@ async function createGameSessionForUser(username, ipAddress) {
             Number(account.account_id),
             sessionId,
             safeIp,
-            expires
+            expiry.expiresForMySql
         ]
     );
 
@@ -70,8 +97,8 @@ async function createGameSessionForUser(username, ipAddress) {
         message: 'Game session created.',
         data: {
             username: String(account.username || ''),
-            sessionId,
-            expiresAtUtc: new Date(expires * 1000).toISOString()
+            sessionId: sessionId,
+            expiresAtUtc: expiry.expiresAtUtcIso
         }
     };
 }
