@@ -2,8 +2,15 @@ const crypto = require('crypto');
 const pool = require('./database');
 const config = require('../config');
 
-function makeSessionId() {
+function makeRawSessionId() {
     return crypto.randomBytes(32).toString('hex');
+}
+
+function makePasswordHash(password, salt) {
+    return crypto
+        .createHash('sha256')
+        .update(config.dbSecret + password + salt)
+        .digest('hex');
 }
 
 function pad2(value) {
@@ -42,8 +49,16 @@ async function createGameSessionForUser(username, ipAddress) {
         };
     }
 
+    if (!config.dbSecret) {
+        return {
+            success: false,
+            statusCode: 500,
+            message: 'DB secret is not configured on the Starforge API host.'
+        };
+    }
+
     const [accountRows] = await pool.execute(
-        `SELECT account_id, username, active
+        `SELECT account_id, username, active, salt
          FROM accounts
          WHERE username = ?
          LIMIT 1`,
@@ -68,7 +83,9 @@ async function createGameSessionForUser(username, ipAddress) {
         };
     }
 
-    const sessionId = makeSessionId();
+    const rawSessionId = makeRawSessionId();
+    const salt = String(account.salt || '');
+    const storedSessionId = makePasswordHash(rawSessionId, salt);
     const expiry = getExpiryValues();
 
     let safeIp = String(ipAddress || '').trim();
@@ -85,7 +102,7 @@ async function createGameSessionForUser(username, ipAddress) {
          VALUES (?, ?, ?, ?)`,
         [
             Number(account.account_id),
-            sessionId,
+            storedSessionId,
             safeIp,
             expiry.expiresForMySql
         ]
@@ -97,7 +114,7 @@ async function createGameSessionForUser(username, ipAddress) {
         message: 'Game session created.',
         data: {
             username: String(account.username || ''),
-            sessionId: sessionId,
+            sessionId: rawSessionId,
             expiresAtUtc: expiry.expiresAtUtcIso
         }
     };
