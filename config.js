@@ -37,6 +37,15 @@ module.exports = {
         sharedSecret: env('WEBHOOK_SHARED_SECRET')
     },
 
+    launcher: {
+        gameSessionMinutes: 5,
+        loginServerAddress: 'login.swg-starforge.com',
+        loginServerPort: 44553,
+        subscriptionFeatures: 1,
+        gameFeatures: 65535,
+        allowMultipleInstances: true
+    },
+
     serverStatus: {
         enabled: true,
         host: '127.0.0.1',

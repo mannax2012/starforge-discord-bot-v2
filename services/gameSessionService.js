@@ -29,12 +29,40 @@ function toMySqlDateTimeUtc(date) {
 }
 
 function getExpiryValues() {
-    const minutes = Number(config.launcherGameSessionMinutes || 5);
+    const minutes = Number(config.launcher.GameSessionMinutes || 5);
     const expiresDate = new Date(Date.now() + (minutes * 60 * 1000));
 
     return {
         expiresAtUtcIso: expiresDate.toISOString(),
         expiresForMySql: toMySqlDateTimeUtc(expiresDate)
+    };
+}
+
+function getLaunchSettings(username, rawSessionId) {
+    const loginServerAddress = String(config.launcher.LoginServerAddress || 'login.swg-starforge.com').trim();
+    const loginServerPort = Number(config.launcher.LoginServerPort || 44553);
+    const subscriptionFeatures = Number(config.launcher.SubscriptionFeatures || 1);
+    const gameFeatures = Number(config.launcher.GameFeatures || 65535);
+    const allowMultipleInstances = Boolean(
+        config.launcher.AllowMultipleInstances === undefined
+            ? true
+            : config.launcher.AllowMultipleInstances
+    );
+
+    return {
+        clientGame: {
+            loginServerAddress0: loginServerAddress,
+            loginServerPort0: loginServerPort,
+            loginClientID: String(username || '')
+        },
+        station: {
+            subscriptionFeatures: subscriptionFeatures,
+            gameFeatures: gameFeatures,
+            sessionId: String(rawSessionId || '')
+        },
+        swgClient: {
+            allowMultipleInstances: allowMultipleInstances
+        }
     };
 }
 
@@ -58,7 +86,7 @@ async function createGameSessionForUser(username, ipAddress) {
     }
 
     const [accountRows] = await pool.execute(
-        `SELECT account_id, username, active, salt
+        `SELECT account_id, username, active, salt, station_id
          FROM accounts
          WHERE username = ?
          LIMIT 1`,
@@ -108,14 +136,22 @@ async function createGameSessionForUser(username, ipAddress) {
         ]
     );
 
+    const launchSettings = getLaunchSettings(account.username, rawSessionId);
+
     return {
         success: true,
         statusCode: 200,
         message: 'Game session created.',
         data: {
             username: String(account.username || ''),
+            stationId: String(account.station_id || ''),
+            accountId: Number(account.account_id || 0),
             sessionId: rawSessionId,
-            expiresAtUtc: expiry.expiresAtUtcIso
+            sessionIdStoredMode: 'saltedSha256',
+            expiresAtUtc: expiry.expiresAtUtcIso,
+            clientGame: launchSettings.clientGame,
+            station: launchSettings.station,
+            swgClient: launchSettings.swgClient
         }
     };
 }
