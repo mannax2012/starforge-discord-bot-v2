@@ -102,6 +102,157 @@ async function buildLauncherProfile(username) {
     return profileResult;
 }
 
+function normalizePatchLines(lines) {
+    if (!Array.isArray(lines)) {
+        return [];
+    }
+
+    const clean = [];
+    const seen = new Set();
+
+    for (const value of lines) {
+        const line = String(value || '').trim();
+        if (!line) {
+            continue;
+        }
+
+        const key = line.toLowerCase();
+        if (seen.has(key)) {
+            continue;
+        }
+
+        seen.add(key);
+        clean.push(line);
+    }
+
+    return clean;
+}
+
+function buildPatchNotesAnnouncementContent(payload) {
+    const version = String(payload.version || '').trim();
+    const date = String(payload.date || '').trim();
+    const titleOverride = String(payload.title || '').trim();
+    const intro = String(payload.intro || '').trim();
+    const patchNotesUrl = String(payload.patchNotesUrl || '').trim();
+    const postedBy = String(payload.postedBy || '').trim();
+    const changes = normalizePatchLines(payload.changes);
+
+    const headline = titleOverride || (version ? `✨ **Starforge Patch Notes — ${version}**` : '✨ **Starforge Patch Notes**');
+    const footerBits = [];
+
+    if (date) {
+        footerBits.push(`Date: ${date}`);
+    }
+
+    if (postedBy) {
+        footerBits.push(`Posted by: ${postedBy}`);
+    }
+
+    const lines = [];
+    lines.push(headline);
+
+    if (intro) {
+        lines.push('');
+        lines.push(intro);
+    }
+
+    if (changes.length > 0) {
+        lines.push('');
+        lines.push('**Changes**');
+    }
+
+    const maxLength = 1900;
+    let content = lines.join('\n');
+
+    let used = 0;
+    let remaining = changes.length;
+
+    for (const change of changes) {
+        const candidate = `• ${change}`;
+        const prefix = content === '' ? '' : '\n';
+        const possible = content + prefix + candidate;
+
+        if (possible.length > maxLength) {
+            break;
+        }
+
+        content = possible;
+        used += 1;
+        remaining -= 1;
+    }
+
+    if (remaining > 0) {
+        const overflowLine = `\n• ...and ${remaining} more change${remaining === 1 ? '' : 's'}.`;
+        if ((content + overflowLine).length <= maxLength) {
+            content += overflowLine;
+        }
+    }
+
+    if (patchNotesUrl) {
+        const urlLine = `\n\nRead full patch notes: ${patchNotesUrl}`;
+        if ((content + urlLine).length <= maxLength) {
+            content += urlLine;
+        }
+    }
+
+    if (footerBits.length > 0) {
+        const footerLine = `\n\n_${footerBits.join(' • ')}_`;
+        if ((content + footerLine).length <= maxLength) {
+            content += footerLine;
+        }
+    }
+
+    return content;
+}
+
+async function postPatchNotesAnnouncement(client, payload) {
+    const channelId = String(config.patchNotesChannelId || config.botLogChannelId || '').trim();
+
+    if (!channelId) {
+        return {
+            success: false,
+            statusCode: 500,
+            message: 'Patch notes Discord channel is not configured.',
+            data: null
+        };
+    }
+
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased()) {
+        return {
+            success: false,
+            statusCode: 500,
+            message: 'Configured patch notes channel could not be used for text messages.',
+            data: null
+        };
+    }
+
+    const content = buildPatchNotesAnnouncementContent(payload);
+    if (!content.trim()) {
+        return {
+            success: false,
+            statusCode: 400,
+            message: 'Patch notes announcement content was empty.',
+            data: null
+        };
+    }
+
+    const message = await channel.send({
+        content,
+        allowedMentions: { parse: [] }
+    });
+
+    return {
+        success: true,
+        statusCode: 200,
+        message: 'Patch notes announcement posted successfully.',
+        data: {
+            channelId: channel.id,
+            messageId: message.id
+        }
+    };
+}
+
 let apiStarted = false;
 
 function startWebApi(client) {
@@ -121,7 +272,7 @@ function startWebApi(client) {
     const app = express();
 
     app.disable('x-powered-by');
-    app.use(express.json({ limit: '32kb' }));
+    app.use(express.json({ limit: '64kb' }));
     app.use(express.urlencoded({ extended: false }));
 
     app.get('/api/health', function (req, res) {
@@ -339,6 +490,42 @@ function startWebApi(client) {
             return res.status(500).json({
                 success: false,
                 message: 'Internal account activation error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/admin/post-patch-notes', requireSharedSecret, async function (req, res) {
+        try {
+            const payload = {
+                version: req.body ? req.body.version : '',
+                date: req.body ? req.body.date : '',
+                changes: req.body ? req.body.changes : [],
+                patchNotesUrl: req.body ? req.body.patchNotesUrl : '',
+                postedBy: req.body ? req.body.postedBy : '',
+                title: req.body ? req.body.title : '',
+                intro: req.body ? req.body.intro : ''
+            };
+
+            const result = await postPatchNotesAnnouncement(client, payload);
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('API patch notes announcement error:', error);
+
+            try {
+                await logToBotChannel(client, `❌ Patch notes announcement API error: ${error.message}`);
+            } catch (logError) {
+                console.error('Failed to log patch notes API error to bot channel:', logError);
+            }
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal patch notes announcement error.',
                 data: null
             });
         }
