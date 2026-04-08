@@ -30,6 +30,9 @@ function requireSharedSecret(req, res, next) {
     const provided = String(req.get('X-Starforge-Key') || '').trim();
     const expected = String(config.webListener && config.webListener.sharedSecret || '').trim();
 
+    console.log('[AuthCheck] provided =', JSON.stringify(provided), 'len=', provided.length);
+    console.log('[AuthCheck] expected =', JSON.stringify(expected), 'len=', expected.length);
+
     if (!expected) {
         return res.status(500).json({
             success: false,
