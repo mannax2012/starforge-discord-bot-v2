@@ -350,12 +350,29 @@ function startWebApi(client) {
     });
 
     app.post('/api/auth/register', requireSharedSecret, async function (req, res) {
+
         try {
             const username = req.body ? req.body.username : '';
             const password = req.body ? req.body.password : '';
             const email = req.body ? req.body.email : '';
+            console.log('[API Register] Request received', {
+                username,
+                email,
+                mode: config.mode || 'live',
+                isTcMode: config.isTcMode === true
+            });
 
             const result = await registerUser(username, password, email, client, null);
+
+            console.log('[API Register] registerUser result', {
+                success: result.success,
+                statusCode: result.statusCode,
+                username: result.username,
+                stationId: result.stationId,
+                tcMirrorCreated: result.tcMirrorCreated,
+                tcMirrorMessage: result.tcMirrorMessage,
+                message: result.message
+            });
 
             if (!result.success) {
                 return res.status(result.statusCode || 400).json({
@@ -460,7 +477,7 @@ function startWebApi(client) {
             });
         }
     });
-    
+
     app.post('/api/account/profile', requireSharedSecret, async function (req, res) {
         try {
             const username = req.body ? req.body.username : '';
@@ -552,27 +569,41 @@ function startWebApi(client) {
         }
     });
 
-    app.post('/api/admin/activate-account', requireSharedSecret, async function (req, res) {
-        try {
-            const username = req.body ? req.body.username : '';
+app.post('/api/admin/activate-account', requireSharedSecret, async function (req, res) {
+    try {
+        const username = req.body ? req.body.username : '';
 
-            const result = await activateAccountByUsername(username);
+        console.log('[API Activate] Request received', {
+            username,
+            mode: config.mode || 'live',
+            isTcMode: config.isTcMode === true
+        });
 
-            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
-                success: result.success,
-                message: result.message,
-                data: result.data || null
-            });
-        } catch (error) {
-            console.error('API admin activate-account error:', error);
+        const result = await activateAccountByUsername(username);
 
-            return res.status(500).json({
-                success: false,
-                message: 'Internal account activation error.',
-                data: null
-            });
-        }
-    });
+        console.log('[API Activate] Local activation result', {
+            username,
+            success: result.success,
+            statusCode: result.statusCode,
+            message: result.message,
+            data: result.data || null
+        });
+
+        return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+            success: result.success,
+            message: result.message,
+            data: result.data || null
+        });
+    } catch (error) {
+        console.error('[API Activate] ERROR', error);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Internal account activation error.',
+            data: null
+        });
+    }
+});
 
     app.post('/api/admin/post-patch-notes', requireSharedSecret, async function (req, res) {
         try {
