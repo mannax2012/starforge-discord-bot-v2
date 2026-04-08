@@ -33,12 +33,33 @@ function getExpiryValues() {
     };
 }
 
-function getLaunchSettings(username, rawSessionId) {
-    const loginServerAddress = String(
-        launcherConfig.launcherLoginServerAddress || 'login.swg-starforge.com'
+function normalizeChannel(options) {
+    const raw = String(
+        options && options.channel ? options.channel : 'Live'
     ).trim();
 
-    const loginServerPort = Number(launcherConfig.launcherLoginServerPort || 44553);
+    return raw.toLowerCase() === 'testcenter' ? 'TestCenter' : 'Live';
+}
+
+function isTestCenterChannel(options) {
+    return normalizeChannel(options) === 'TestCenter';
+}
+
+function getLaunchSettings(username, rawSessionId, options) {
+    const isTestCenter = isTestCenterChannel(options);
+
+    const loginServerAddress = String(
+        isTestCenter
+            ? (launcherConfig.launcherTcLoginServerAddress || launcherConfig.launcherLoginServerAddress || 'testcenter.swg-starforge.com')
+            : (launcherConfig.launcherLoginServerAddress || 'login.swg-starforge.com')
+    ).trim();
+
+    const loginServerPort = Number(
+        isTestCenter
+            ? (launcherConfig.launcherTcLoginServerPort || launcherConfig.launcherLoginServerPort || 44453)
+            : (launcherConfig.launcherLoginServerPort || 44553)
+    );
+
     const subscriptionFeatures = Number(launcherConfig.launcherSubscriptionFeatures || 1);
     const gameFeatures = Number(launcherConfig.launcherGameFeatures || 65535);
 
@@ -78,17 +99,7 @@ function normalizeIpAddress(ipAddress) {
     return safeIp;
 }
 
-async function createGameSessionForUser(username, ipAddress) {
-    const normalizedUsername = String(username || '').trim();
-
-    if (!normalizedUsername) {
-        return {
-            success: false,
-            statusCode: 400,
-            message: 'Username is required.'
-        };
-    }
-
+async function loadAccount(normalizedUsername) {
     const [accountRows] = await pool.execute(
         `SELECT account_id, username, active, station_id
          FROM accounts
@@ -98,30 +109,17 @@ async function createGameSessionForUser(username, ipAddress) {
     );
 
     if (!accountRows.length) {
-        return {
-            success: false,
-            statusCode: 404,
-            message: 'Account not found.'
-        };
+        return null;
     }
 
-    const account = accountRows[0];
+    return accountRows[0];
+}
 
-    if (Number(account.active || 0) !== 1) {
-        return {
-            success: false,
-            statusCode: 403,
-            message: 'Account is not active yet.'
-        };
-    }
-
+async function createLocalGameSession(account, ipAddress, options) {
     const rawSessionId = makeRawSessionId();
     const expiry = getExpiryValues();
     const safeIp = normalizeIpAddress(ipAddress);
 
-    // IMPORTANT:
-    // For this test, store the RAW session token exactly as returned to the launcher.
-    // That keeps the bot -> launcher -> client -> server handoff identical.
     await pool.execute(
         `REPLACE INTO sessions (account_id, session_id, ip, expires)
          VALUES (?, ?, ?, ?)`,
@@ -133,7 +131,7 @@ async function createGameSessionForUser(username, ipAddress) {
         ]
     );
 
-    const launchSettings = getLaunchSettings(account.username, rawSessionId);
+    const launchSettings = getLaunchSettings(account.username, rawSessionId, options);
 
     return {
         success: true,
@@ -151,6 +149,118 @@ async function createGameSessionForUser(username, ipAddress) {
             swgClient: launchSettings.swgClient
         }
     };
+}
+
+async function createRemoteTcGameSession(account, ipAddress, options) {
+    const endpoint = String(launcherConfig.launcherTcSessionApiUrl || '').trim();
+
+    if (!endpoint) {
+        return {
+            success: false,
+            statusCode: 500,
+            message: 'Test Center session API URL is not configured.'
+        };
+    }
+
+    const sharedSecret = String(
+        launcherConfig.launcherTcSessionApiKey ||
+        launcherConfig.launcherTcSharedSecret ||
+        ''
+    ).trim();
+
+    const payload = {
+        username: String(account.username || ''),
+        accountId: Number(account.account_id || 0),
+        stationId: String(account.station_id || ''),
+        ipAddress: normalizeIpAddress(ipAddress),
+        channel: normalizeChannel(options)
+    };
+
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+
+    if (sharedSecret) {
+        headers['X-Starforge-Key'] = sharedSecret;
+    }
+
+    let response;
+    let json;
+
+    try {
+        response = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
+        });
+    } catch (error) {
+        return {
+            success: false,
+            statusCode: 502,
+            message: `Failed to reach Test Center session API: ${error.message}`
+        };
+    }
+
+    try {
+        json = await response.json();
+    } catch (error) {
+        return {
+            success: false,
+            statusCode: 502,
+            message: 'Test Center session API returned unreadable JSON.'
+        };
+    }
+
+    if (!response.ok || !json || !json.success || !json.data) {
+        return {
+            success: false,
+            statusCode: response.status || 502,
+            message: (json && json.message) || 'Test Center session API returned an error.'
+        };
+    }
+
+    return {
+        success: true,
+        statusCode: 200,
+        message: json.message || 'Test Center game session created.',
+        data: json.data
+    };
+}
+
+async function createGameSessionForUser(username, ipAddress, options) {
+    const normalizedUsername = String(username || '').trim();
+
+    if (!normalizedUsername) {
+        return {
+            success: false,
+            statusCode: 400,
+            message: 'Username is required.'
+        };
+    }
+
+    const account = await loadAccount(normalizedUsername);
+
+    if (!account) {
+        return {
+            success: false,
+            statusCode: 404,
+            message: 'Account not found.'
+        };
+    }
+
+    if (Number(account.active || 0) !== 1) {
+        return {
+            success: false,
+            statusCode: 403,
+            message: 'Account is not active yet.'
+        };
+    }
+
+    if (isTestCenterChannel(options)) {
+        return await createRemoteTcGameSession(account, ipAddress, options);
+    }
+
+    return await createLocalGameSession(account, ipAddress, options);
 }
 
 module.exports = {

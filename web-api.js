@@ -20,10 +20,15 @@ const {
     cleanupExpiredSessions
 } = require('./services/launcherSessionService');
 const { createGameSessionForUser } = require('./services/gameSessionService');
+const {
+    getCachedGameSession,
+    setCachedGameSession,
+    clearCachedGameSessions
+} = require('./services/launcherGameSessionCache');
 
 function requireSharedSecret(req, res, next) {
     const provided = String(req.get('X-Starforge-Key') || '').trim();
-    const expected = String(config.webListener.sharedSecret || '').trim();
+    const expected = String(config.webListener && config.webListener.sharedSecret || '').trim();
 
     if (!expected) {
         return res.status(500).json({
@@ -63,7 +68,7 @@ function buildStatusFallback() {
     return {
         schemaVersion: 3,
         generatedAt: new Date().toISOString(),
-        serverName: 'Starforge',
+        serverName: config.isTcMode ? 'Starforge Test Center' : 'Starforge',
         status: 'down',
         statusLabel: 'OFFLINE',
         connectedUsers: 0,
@@ -164,7 +169,6 @@ function buildPatchNotesAnnouncementContent(payload) {
     const maxLength = 1900;
     let content = lines.join('\n');
 
-    let used = 0;
     let remaining = changes.length;
 
     for (const change of changes) {
@@ -177,7 +181,6 @@ function buildPatchNotesAnnouncementContent(payload) {
         }
 
         content = possible;
-        used += 1;
         remaining -= 1;
     }
 
@@ -206,6 +209,16 @@ function buildPatchNotesAnnouncementContent(payload) {
 }
 
 async function postPatchNotesAnnouncement(client, payload) {
+    if (!config.features || !config.features.reviewPostsEnabled) {
+        return {
+            success: true,
+            skipped: true,
+            statusCode: 200,
+            message: 'Patch notes announcement disabled in this mode.',
+            data: null
+        };
+    }
+
     const channelId = String(config.patchNotesChannelId || config.botLogChannelId || '').trim();
 
     if (!channelId) {
@@ -213,6 +226,15 @@ async function postPatchNotesAnnouncement(client, payload) {
             success: false,
             statusCode: 500,
             message: 'Patch notes Discord channel is not configured.',
+            data: null
+        };
+    }
+
+    if (!client) {
+        return {
+            success: false,
+            statusCode: 500,
+            message: 'Discord client is not available in this mode.',
             data: null
         };
     }
@@ -253,6 +275,18 @@ async function postPatchNotesAnnouncement(client, payload) {
     };
 }
 
+async function maybePostActivationReview(client, payload) {
+    if (!config.features || !config.features.reviewPostsEnabled) {
+        return {
+            success: true,
+            skipped: true,
+            message: 'Activation review posting disabled in this mode.'
+        };
+    }
+
+    return await postActivationReview(client, payload);
+}
+
 let apiStarted = false;
 
 function startWebApi(client) {
@@ -278,6 +312,7 @@ function startWebApi(client) {
     app.get('/api/health', function (req, res) {
         res.json({
             success: true,
+            mode: config.mode || 'live',
             message: 'Starforge API is online.'
         });
     });
@@ -330,7 +365,7 @@ function startWebApi(client) {
                 });
             }
 
-            const reviewResult = await postActivationReview(client, {
+            const reviewResult = await maybePostActivationReview(client, {
                 username: result.username,
                 email: result.email,
                 requestedBy: result.username,
@@ -338,7 +373,7 @@ function startWebApi(client) {
                 stationId: result.stationId || ''
             });
 
-            if (!reviewResult.success) {
+            if (config.features && config.features.reviewPostsEnabled && !reviewResult.success) {
                 console.error('API register review post failed:', reviewResult.message);
 
                 await logToBotChannel(
@@ -358,7 +393,9 @@ function startWebApi(client) {
 
             return res.status(201).json({
                 success: true,
-                message: 'Account created and submitted for staff activation review.',
+                message: config.features && config.features.reviewPostsEnabled
+                    ? 'Account created and submitted for staff activation review.'
+                    : 'Account created successfully.',
                 data: {
                     username: result.username,
                     email: result.email,
@@ -595,6 +632,7 @@ function startWebApi(client) {
     });
 
     app.post('/api/launcher/logout', requireLauncherSession, async function (req, res) {
+        clearCachedGameSessions(req.launcherAccessToken);
         revokeSession(req.launcherAccessToken);
 
         return res.status(200).json({
@@ -680,7 +718,7 @@ function startWebApi(client) {
                 });
             }
 
-            const reviewResult = await postActivationReview(client, {
+            const reviewResult = await maybePostActivationReview(client, {
                 username: result.username,
                 email: result.email,
                 requestedBy: result.username,
@@ -688,7 +726,7 @@ function startWebApi(client) {
                 stationId: result.stationId || ''
             });
 
-            if (!reviewResult.success) {
+            if (config.features && config.features.reviewPostsEnabled && !reviewResult.success) {
                 return res.status(500).json({
                     success: false,
                     message: 'Account created, but launcher activation review posting failed.',
@@ -701,7 +739,9 @@ function startWebApi(client) {
 
             return res.status(201).json({
                 success: true,
-                message: 'Account created and submitted for staff activation review.',
+                message: config.features && config.features.reviewPostsEnabled
+                    ? 'Account created and submitted for staff activation review.'
+                    : 'Account created successfully.',
                 data: {
                     username: result.username,
                     email: result.email,
@@ -742,7 +782,7 @@ function startWebApi(client) {
                 });
             }
 
-            const reviewResult = await postActivationReview(client, {
+            const reviewResult = await maybePostActivationReview(client, {
                 username: profileResult.data.username,
                 email: profileResult.data.email,
                 requestedBy: profileResult.data.username,
@@ -750,7 +790,7 @@ function startWebApi(client) {
                 stationId: profileResult.data.station_id || ''
             });
 
-            if (!reviewResult.success) {
+            if (config.features && config.features.reviewPostsEnabled && !reviewResult.success) {
                 return res.status(500).json({
                     success: false,
                     message: 'Activation review request could not be posted.',
@@ -760,7 +800,9 @@ function startWebApi(client) {
 
             return res.status(200).json({
                 success: true,
-                message: 'Activation request sent to staff review.',
+                message: config.features && config.features.reviewPostsEnabled
+                    ? 'Activation request sent to staff review.'
+                    : 'Activation request accepted.',
                 data: {
                     username: profileResult.data.username,
                     accountStatus: 'inactive'
@@ -785,10 +827,28 @@ function startWebApi(client) {
                 req.ip ||
                 '';
 
+            const channel = String(req.body && req.body.channel ? req.body.channel : 'Live').trim();
+
+            const cached = getCachedGameSession(req.launcherAccessToken, channel);
+            if (cached) {
+                return res.status(200).json({
+                    success: true,
+                    message: 'Using cached game session.',
+                    data: cached
+                });
+            }
+
             const result = await createGameSessionForUser(
                 req.launcherSession.username,
-                requestIp
+                requestIp,
+                {
+                    channel: channel
+                }
             );
+
+            if (result.success && result.data) {
+                setCachedGameSession(req.launcherAccessToken, channel, result.data);
+            }
 
             return res.status(result.statusCode || (result.success ? 200 : 400)).json({
                 success: result.success,
@@ -810,10 +870,10 @@ function startWebApi(client) {
     const port = config.webListener.port;
 
     app.listen(port, host, async function () {
-        console.log(`Starforge Web API listening on http://${host}:${port}`);
+        console.log(`Starforge Web API listening on http://${host}:${port} [mode=${config.mode || 'live'}]`);
 
         try {
-            await logToBotChannel(client, `🌐 Starforge Web API listening on ${host}:${port}`);
+            await logToBotChannel(client, `🌐 Starforge Web API listening on ${host}:${port} [mode=${config.mode || 'live'}]`);
         } catch (error) {
             console.error('Failed to log API startup to bot channel:', error);
         }

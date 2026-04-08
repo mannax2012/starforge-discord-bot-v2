@@ -17,7 +17,38 @@ function envInt(name, fallback = 0) {
     return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function envBool(name, fallback = false) {
+    const raw = String(env(name, fallback ? 'true' : 'false')).trim().toLowerCase();
+    return raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
+}
+
+const botMode = String(env('BOT_MODE', 'live')).trim().toLowerCase();
+const isTcMode = botMode === 'tc' || botMode === 'testcenter';
+const isLiveMode = !isTcMode;
+
+const discordEnabled = envBool('DISCORD_ENABLED', isLiveMode);
+const reviewPostsEnabled = envBool('DISCORD_REVIEW_POSTS_ENABLED', isLiveMode);
+const commandsEnabled = envBool('DISCORD_COMMANDS_ENABLED', isLiveMode);
+const welcomeEnabled = envBool('DISCORD_WELCOME_ENABLED', isLiveMode);
+const botLogEnabled = envBool('DISCORD_BOT_LOG_ENABLED', isLiveMode);
+const webApiEnabled = envBool('WEB_LISTENER_ENABLED', true);
+const statusEnabled = envBool('STATUS_MONITOR_ENABLED', true);
+
 module.exports = {
+    mode: isTcMode ? 'tc' : 'live',
+    isLiveMode,
+    isTcMode,
+
+    features: {
+        discordEnabled,
+        reviewPostsEnabled,
+        commandsEnabled,
+        welcomeEnabled,
+        botLogEnabled,
+        webApiEnabled,
+        statusEnabled
+    },
+
     token: env('DISCORD_TOKEN'),
     prefix: env('COMMAND_PREFIX', '!'),
     autoRoleName: env('AUTO_ROLE_NAME', 'Player'),
@@ -28,32 +59,51 @@ module.exports = {
     welcomeChannelName: env('WELCOME_CHANNEL_NAME', 'general'),
     accountReviewChannelId: env('ACCOUNT_REVIEW_CHANNEL_ID'),
     botLogChannelId: env('BOT_LOG_CHANNEL_ID'),
-    downloadUrl: env('DOWNLOAD_URL', 'https://www.dropbox.com/scl/fi/16mr43e42i7onbvmvcy1k/SWG-StarforgeInstaller.exe?rlkey=9lyr7jkiaj5nfzpchgu65sety&st=fixgflf9&dl=1'),
+    patchNotesChannelId: env('PATCH_NOTES_CHANNEL_ID'),
+    downloadUrl: env('DOWNLOAD_URL', 'https://swg-starforge.com/launcher/StarforgeInstaller.exe'),
 
     webListener: {
-        enabled: env('WEB_LISTENER_ENABLED', 'true').toLowerCase() === 'true',
-        port: envInt('WEB_LISTENER_PORT', 44467),
+        enabled: webApiEnabled,
+        port: envInt('WEB_LISTENER_PORT', isTcMode ? 44557 : 44567),
         path: env('WEB_LISTENER_PATH', '/notify'),
         sharedSecret: env('WEBHOOK_SHARED_SECRET')
     },
 
     launcher: {
-        gameSessionMinutes: 5,
-        loginServerAddress: 'login.swg-starforge.com',
-        loginServerPort: 44553,
-        subscriptionFeatures: 1,
-        gameFeatures: 65535,
-        allowMultipleInstances: true
+        launcherGameSessionMinutes: envInt('LAUNCHER_GAME_SESSION_MINUTES', 5),
+
+        launcherLoginServerAddress: env('LAUNCHER_LOGIN_SERVER_ADDRESS', 'login.swg-starforge.com'),
+        launcherLoginServerPort: envInt('LAUNCHER_LOGIN_SERVER_PORT', 44553),
+
+        launcherTcLoginServerAddress: env('LAUNCHER_TC_LOGIN_SERVER_ADDRESS', 'testcenter.swg-starforge.com'),
+        launcherTcLoginServerPort: envInt('LAUNCHER_TC_LOGIN_SERVER_PORT', 44453),
+
+        launcherSubscriptionFeatures: envInt('LAUNCHER_SUBSCRIPTION_FEATURES', 1),
+        launcherGameFeatures: envInt('LAUNCHER_GAME_FEATURES', 65535),
+        launcherAllowMultipleInstances: envBool('LAUNCHER_ALLOW_MULTIPLE_INSTANCES', true),
+
+        launcherTcSessionApiUrl: env('LAUNCHER_TC_SESSION_API_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/tc-game-session'),
+        launcherTcSessionApiKey: env('LAUNCHER_TC_SESSION_API_KEY', '')
     },
 
     serverStatus: {
-        enabled: true,
-        host: '127.0.0.1',
-        port: 44465,
-        timeoutMs: 7000,
-        intervalMs: 30000,
-        outputPath: '/var/www/html/website/server_status.json',
-        statePath: './data/server_status_state.json'
+        enabled: statusEnabled,
+        host: env('STATUS_HOST', '127.0.0.1'),
+        port: envInt('STATUS_PORT', isTcMode ? 44455 : 44465),
+        timeoutMs: envInt('STATUS_TIMEOUT_MS', 7000),
+        intervalMs: envInt('STATUS_INTERVAL_MS', 30000),
+        outputPath: env(
+            'STATUS_OUTPUT_PATH',
+            isTcMode
+                ? '/var/www/html/website/server_status_tc.json'
+                : '/var/www/html/website/server_status.json'
+        ),
+        statePath: env(
+            'STATUS_STATE_PATH',
+            isTcMode
+                ? './data/server_status_state_tc.json'
+                : './data/server_status_state.json'
+        )
     },
 
     db: {
@@ -64,5 +114,6 @@ module.exports = {
         database: env('DB_NAME', 'swgemu'),
         charset: 'utf8mb4'
     },
+
     dbSecret: env('DB_SECRET')
 };

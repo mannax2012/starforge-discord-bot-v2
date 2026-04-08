@@ -59,6 +59,14 @@ function getDescription(source, username) {
 }
 
 async function postActivationReview(client, options) {
+    if (!config.features.reviewPostsEnabled) {
+        return {
+            success: true,
+            skipped: true,
+            message: 'Activation review posts are disabled in this mode.'
+        };
+    }
+
     const username = String(options && options.username ? options.username : '').trim();
     const email = options && options.email ? String(options.email).trim() : '';
     const requestedBy = options && options.requestedBy ? String(options.requestedBy).trim() : username;
