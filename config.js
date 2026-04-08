@@ -86,6 +86,12 @@ module.exports = {
         launcherTcSessionApiKey: env('LAUNCHER_TC_SESSION_API_KEY', '')
     },
 
+    registrationMirror: {
+        enabled: true,
+        tcRegisterUrl: 'http://testcenter.swg-starforge.com:44567/api/internal/register-mirror',
+        tcSharedSecret: 'LAUNCHER_TC_SESSION_API_KEY'
+    },
+
     serverStatus: {
         enabled: statusEnabled,
         host: env('STATUS_HOST', '127.0.0.1'),

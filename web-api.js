@@ -400,7 +400,9 @@ function startWebApi(client) {
                     username: result.username,
                     email: result.email,
                     stationId: result.stationId || null,
-                    accountStatus: 'inactive'
+                    accountStatus: 'inactive',
+                    tcMirrorCreated: !!result.tcMirrorCreated,
+                    tcMirrorMessage: result.tcMirrorMessage || ''
                 }
             });
         } catch (error) {
@@ -419,6 +421,46 @@ function startWebApi(client) {
         }
     });
 
+    app.post('/api/internal/register-mirror', requireSharedSecret, async function (req, res) {
+        try {
+            const username = req.body ? req.body.username : '';
+            const password = req.body ? req.body.password : '';
+            const email = req.body ? req.body.email : '';
+
+            const result = await registerUser(username, password, email, null, null, {
+                suppressBotLog: true,
+                skipTcMirror: true
+            });
+
+            if (!result.success) {
+                return res.status(result.statusCode || 400).json({
+                    success: false,
+                    message: result.message,
+                    data: null
+                });
+            }
+
+            return res.status(201).json({
+                success: true,
+                message: 'Mirror account created successfully.',
+                data: {
+                    username: result.username,
+                    email: result.email,
+                    stationId: result.stationId || null,
+                    accountStatus: 'inactive'
+                }
+            });
+        } catch (error) {
+            console.error('Internal mirror register error:', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal mirror registration error.',
+                data: null
+            });
+        }
+    });
+    
     app.post('/api/account/profile', requireSharedSecret, async function (req, res) {
         try {
             const username = req.body ? req.body.username : '';
