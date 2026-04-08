@@ -4,7 +4,10 @@ const net = require('net');
 const config = require('../config');
 
 const FAILURE_THRESHOLD = 3;
-const DEFAULT_SERVER_NAME = 'Starforge';
+const DEFAULT_SERVER_NAME =
+    String(config.mode || '').trim().toLowerCase() === 'tc' || config.isTcMode === true
+        ? 'Starforge Test Center'
+        : 'Starforge';
 
 function ensureDirectoryForFile(filePath) {
     const dir = path.dirname(filePath);
@@ -641,6 +644,29 @@ function startStatusMonitor() {
     console.log(`Status state path: ${resolvedStatePath}`);
 
     let running = false;
+    let hasPrintedInitialStatus = false;
+    let lastPrintedStatus = null;
+    let lastPrintedConnectedUsers = null;
+
+    function maybePrintStatus(output) {
+        const currentStatus = String(output && output.status ? output.status : 'down');
+        const currentConnectedUsers = Number(output && output.connectedUsers ? output.connectedUsers : 0);
+
+        const shouldPrint =
+            !hasPrintedInitialStatus ||
+            currentStatus !== lastPrintedStatus ||
+            currentConnectedUsers !== lastPrintedConnectedUsers;
+
+        if (!shouldPrint) {
+            return;
+        }
+
+        hasPrintedInitialStatus = true;
+        lastPrintedStatus = currentStatus;
+        lastPrintedConnectedUsers = currentConnectedUsers;
+
+        console.log(`Status: ${currentStatus} | PlayersConnected: ${currentConnectedUsers}`);
+    }
 
     async function tick() {
         if (running) {
@@ -651,29 +677,7 @@ function startStatusMonitor() {
 
         try {
             const result = await runStatusUpdate();
-            let line =
-                `Status updated: ${result.output.status}` +
-                ` | ServerName=${result.output.serverName}` +
-                ` | PlayersConnected=${result.output.connectedUsers}` +
-                ` | PlayerCap=${result.output.playerCap}` +
-                ` | PeakPlayers=${result.output.peakPlayers}` +
-                ` | HighWater=${result.output.maxConnectedUsers}`;
-
-            if (result.output.consecutiveFailures > 0) {
-                line += ` | Failures=${result.output.consecutiveFailures}`;
-            }
-
-            if (result.output.transportWarning) {
-                line += ` | TransportWarning=${result.output.transportWarning}`;
-            }
-
-            if (result.output.probeError) {
-                line += ` | ProbeError=${result.output.probeError}`;
-            }
-
-            line += ` | file=${result.outputPath}`;
-
-            console.log(line);
+            maybePrintStatus(result.output);
         } catch (error) {
             console.error('Status update failed:', error);
         } finally {
