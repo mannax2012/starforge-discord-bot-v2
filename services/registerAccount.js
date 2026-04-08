@@ -16,13 +16,97 @@ function isValidEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
 }
 
-async function registerUser(username, password, email, client, message) {
+function isTcMode() {
+    const mode = String(config.mode || '').trim().toLowerCase();
+    return mode === 'tc' || mode === 'testcenter' || config.isTcMode === true;
+}
+
+async function mirrorAccountToTc(username, password, email) {
+    const mirrorConfig = config.registrationMirror || {};
+    const endpoint = String(mirrorConfig.tcRegisterUrl || '').trim();
+    const sharedSecret = String(mirrorConfig.tcSharedSecret || '').trim();
+    const enabled = mirrorConfig.enabled !== false;
+
+    if (!enabled) {
+        return {
+            attempted: false,
+            success: false,
+            message: 'TC mirroring disabled.'
+        };
+    }
+
+    if (!endpoint) {
+        return {
+            attempted: true,
+            success: false,
+            message: 'TC mirror URL is not configured.'
+        };
+    }
+
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+
+    if (sharedSecret) {
+        headers['X-Starforge-Key'] = sharedSecret;
+    }
+
+    let response;
+    let json;
+
+    try {
+        response = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                username: String(username || '').trim(),
+                password: String(password || ''),
+                email: String(email || '').trim()
+            })
+        });
+    } catch (error) {
+        return {
+            attempted: true,
+            success: false,
+            message: `Failed to reach TC mirror registration API: ${error.message}`
+        };
+    }
+
+    try {
+        json = await response.json();
+    } catch (error) {
+        return {
+            attempted: true,
+            success: false,
+            message: 'TC mirror registration API returned unreadable JSON.'
+        };
+    }
+
+    if (!response.ok || !json || !json.success) {
+        return {
+            attempted: true,
+            success: false,
+            message: (json && json.message) || 'TC mirror registration API returned an error.'
+        };
+    }
+
+    return {
+        attempted: true,
+        success: true,
+        message: json.message || 'TC account created successfully.'
+    };
+}
+
+async function registerUser(username, password, email, client, message, options) {
+    const opts = options || {};
+    const normalizedUsername = String(username || '').trim();
+    const normalizedEmail = String(email || '').trim();
+    const suppressBotLog = Boolean(opts.suppressBotLog);
+    const skipTcMirror = Boolean(opts.skipTcMirror);
+
     if (!config.dbSecret) {
         return { success: false, statusCode: 500, message: 'DB_SECRET is not configured.' };
     }
-
-    const normalizedUsername = String(username || '').trim();
-    const normalizedEmail = String(email || '').trim();
 
     if (!normalizedUsername || !password || !normalizedEmail) {
         return { success: false, statusCode: 400, message: 'Username, email, and password are required.' };
@@ -82,26 +166,48 @@ async function registerUser(username, password, email, client, message) {
 
         await connection.commit();
 
-        await logToBotChannel(
-            client,
-            `✅ New account registered: \`${normalizedUsername}\`${message ? ` by ${message.author.tag}` : ''}`
-        );
+        if (!suppressBotLog) {
+            await logToBotChannel(
+                client,
+                `✅ New account registered: \`${normalizedUsername}\`${message ? ` by ${message.author.tag}` : ''}`
+            );
+        }
+
+        let tcMirrorCreated = false;
+        let tcMirrorMessage = 'TC mirroring skipped.';
+
+        if (!isTcMode() && !skipTcMirror) {
+            const mirrorResult = await mirrorAccountToTc(normalizedUsername, password, normalizedEmail);
+            tcMirrorCreated = mirrorResult.success;
+            tcMirrorMessage = mirrorResult.message;
+
+            if (!mirrorResult.success && mirrorResult.attempted) {
+                await logToBotChannel(
+                    client,
+                    `⚠️ Live account \`${normalizedUsername}\` was created, but TC mirror creation failed: ${mirrorResult.message}`
+                );
+            }
+        }
 
         return {
             success: true,
             statusCode: 201,
             username: normalizedUsername,
             email: normalizedEmail,
-            stationId
+            stationId,
+            tcMirrorCreated,
+            tcMirrorMessage
         };
     } catch (error) {
         await connection.rollback();
         console.error('Registration error:', error);
 
-        await logToBotChannel(
-            client,
-            `❌ Registration failed for \`${normalizedUsername}\`: ${error.message}`
-        );
+        if (!suppressBotLog) {
+            await logToBotChannel(
+                client,
+                `❌ Registration failed for \`${normalizedUsername}\`: ${error.message}`
+            );
+        }
 
         return {
             success: false,
