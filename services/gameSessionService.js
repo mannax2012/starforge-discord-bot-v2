@@ -36,9 +36,17 @@ function getExpiryValues() {
 function normalizeChannel(options) {
     const raw = String(
         options && options.channel ? options.channel : 'Live'
-    ).trim();
+    ).trim().toLowerCase();
 
-    return raw.toLowerCase() === 'testcenter' ? 'TestCenter' : 'Live';
+    if (
+        raw === 'testcenter' ||
+        raw === 'test center' ||
+        raw === 'tc'
+    ) {
+        return 'TestCenter';
+    }
+
+    return 'Live';
 }
 
 function isTestCenterChannel(options) {

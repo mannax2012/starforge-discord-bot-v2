@@ -827,7 +827,14 @@ function startWebApi(client) {
                 req.ip ||
                 '';
 
-            const channel = String(req.body && req.body.channel ? req.body.channel : 'Live').trim();
+            const channelRaw = String(req.body && req.body.channel ? req.body.channel : 'Live').trim();
+
+            const channel =
+                channelRaw.toLowerCase() === 'testcenter' ||
+                channelRaw.toLowerCase() === 'test center' ||
+                channelRaw.toLowerCase() === 'tc'
+                    ? 'TestCenter'
+                    : 'Live';
 
             const cached = getCachedGameSession(req.launcherAccessToken, channel);
             if (cached) {
