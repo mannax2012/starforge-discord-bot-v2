@@ -89,13 +89,14 @@ module.exports = {
     registrationMirror: {
         enabled: true,
         tcRegisterUrl: 'http://testcenter.swg-starforge.com:44567/api/internal/register-mirror',
+        tcActivateUrl: 'http://testcenter.swg-starforge.com:44567/api/internal/activate-mirror',
         tcSharedSecret: env('LAUNCHER_TC_SESSION_API_KEY', '')
-    },
+        },
 
     serverStatus: {
         enabled: statusEnabled,
         host: env('STATUS_HOST', '127.0.0.1'),
-        port: envInt('STATUS_PORT', isTcMode ? 44455 : 44465),
+        port: envInt('STATUS_PORT', isTcMode ? 44455 : 44555),
         timeoutMs: envInt('STATUS_TIMEOUT_MS', 7000),
         intervalMs: envInt('STATUS_INTERVAL_MS', 30000),
         outputPath: env(

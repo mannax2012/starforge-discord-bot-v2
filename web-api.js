@@ -30,8 +30,8 @@ function requireSharedSecret(req, res, next) {
     const provided = String(req.get('X-Starforge-Key') || '').trim();
     const expected = String(config.webListener && config.webListener.sharedSecret || '').trim();
 
-    console.log('[AuthCheck] provided =', JSON.stringify(provided), 'len=', provided.length);
-    console.log('[AuthCheck] expected =', JSON.stringify(expected), 'len=', expected.length);
+    //console.log('[AuthCheck] provided =', JSON.stringify(provided), 'len=', provided.length);
+    //console.log('[AuthCheck] expected =', JSON.stringify(expected), 'len=', expected.length);
 
     if (!expected) {
         return res.status(500).json({
@@ -440,7 +440,45 @@ function startWebApi(client) {
             });
         }
     });
+    
+    app.post('/api/internal/activate-mirror', requireSharedSecret, async function (req, res) {
+        try {
+            const username = req.body ? req.body.username : '';
 
+            console.log('[API Internal Activate Mirror] Request received', {
+                username,
+                mode: config.mode || 'live',
+                isTcMode: config.isTcMode === true
+            });
+
+            const result = await activateAccountByUsername(username, {
+                skipTcMirror: true
+            });
+
+            console.log('[API Internal Activate Mirror] Result', {
+                username,
+                success: result.success,
+                statusCode: result.statusCode,
+                message: result.message,
+                data: result.data || null
+            });
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('[API Internal Activate Mirror] ERROR', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal mirror activation error.',
+                data: null
+            });
+        }
+    });
+    
     app.post('/api/internal/register-mirror', requireSharedSecret, async function (req, res) {
         try {
             const username = req.body ? req.body.username : '';

@@ -1,7 +1,7 @@
-const pool = require('../services/database');
 const registrationMap = require('../utils/registrationMap');
 const { userHasAdminRole } = require('../utils/roleCheck');
 const { logToBotChannel } = require('../services/logging');
+const { activateAccountByUsername } = require('../services/accountService');
 
 module.exports = {
     name: 'activate',
@@ -21,28 +21,49 @@ module.exports = {
         }
 
         try {
-            const [accountRows] = await pool.execute(
-                'SELECT active FROM accounts WHERE username = ? LIMIT 1',
-                [username]
-            );
+            console.log('[ActivateCommand] Request received', {
+                username,
+                requestedBy: message.author.tag
+            });
 
-            if (!accountRows.length) {
-                await logToBotChannel(client, `❌ ${message.author.tag} tried to activate missing account \`${username}\`.`);
-                return message.reply(`❌ Account **${username}** was not found.`);
+            const result = await activateAccountByUsername(username);
+
+            console.log('[ActivateCommand] Activation result', {
+                username,
+                success: result.success,
+                statusCode: result.statusCode,
+                message: result.message,
+                data: result.data || null
+            });
+
+            if (!result.success) {
+                if (result.alreadyActive) {
+                    await logToBotChannel(client, `ℹ️ ${message.author.tag} attempted to activate already-active account \`${username}\`.`);
+                    return message.reply(`⚠️ Account **${username}** is already activated.`);
+                }
+
+                if (result.statusCode === 404) {
+                    await logToBotChannel(client, `❌ ${message.author.tag} tried to activate missing account \`${username}\`.`);
+                    return message.reply(`❌ Account **${username}** was not found.`);
+                }
+
+                await logToBotChannel(client, `❌ ${message.author.tag} failed to activate \`${username}\`: ${result.message}`);
+                return message.reply(`❌ ${result.message}`);
             }
 
-            if (Number(accountRows[0].active) === 1) {
-                await logToBotChannel(client, `ℹ️ ${message.author.tag} attempted to activate already-active account \`${username}\`.`);
-                return message.reply(`⚠️ Account **${username}** is already activated.`);
-            }
-
-            await pool.execute(
-                'UPDATE accounts SET active = 1 WHERE username = ?',
-                [username]
+            await logToBotChannel(
+                client,
+                `✅ ${message.author.tag} activated account \`${username}\`. ` +
+                `TC mirror: ${result.data && result.data.tcMirrorActivated ? 'success' : 'not confirmed'} ` +
+                `(${result.data && result.data.tcMirrorMessage ? result.data.tcMirrorMessage : 'no message'})`
             );
 
-            await logToBotChannel(client, `✅ ${message.author.tag} activated account \`${username}\`.`);
-            await message.reply(`✅ Account **${username}** has been activated.`);
+            await message.reply(
+                `✅ Account **${username}** has been activated.` +
+                (result.data && result.data.tcMirrorMessage
+                    ? `\nTC mirror: ${result.data.tcMirrorMessage}`
+                    : '')
+            );
 
             const discordId = registrationMap.get(username);
             if (discordId) {
