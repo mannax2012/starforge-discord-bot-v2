@@ -828,7 +828,6 @@ function startWebApi(client) {
                 '';
 
             const channelRaw = String(req.body && req.body.channel ? req.body.channel : 'Live').trim();
-
             const channel =
                 channelRaw.toLowerCase() === 'testcenter' ||
                 channelRaw.toLowerCase() === 'test center' ||
@@ -836,6 +835,11 @@ function startWebApi(client) {
                     ? 'TestCenter'
                     : 'Live';
 
+            console.log('[Launcher API] /api/launcher/game-session raw=%s normalized=%s user=%s',
+                channelRaw,
+                channel,
+                req.launcherSession.username
+            );
             const cached = getCachedGameSession(req.launcherAccessToken, channel);
             if (cached) {
                 return res.status(200).json({

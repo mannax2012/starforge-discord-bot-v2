@@ -38,11 +38,7 @@ function normalizeChannel(options) {
         options && options.channel ? options.channel : 'Live'
     ).trim().toLowerCase();
 
-    if (
-        raw === 'testcenter' ||
-        raw === 'test center' ||
-        raw === 'tc'
-    ) {
+    if (raw === 'testcenter' || raw === 'test center' || raw === 'tc') {
         return 'TestCenter';
     }
 
@@ -53,18 +49,23 @@ function isTestCenterChannel(options) {
     return normalizeChannel(options) === 'TestCenter';
 }
 
+function isTcBotMode() {
+    const mode = String(config.mode || '').trim().toLowerCase();
+    return mode === 'tc' || mode === 'testcenter' || config.isTcMode === true;
+}
+
 function getLaunchSettings(username, rawSessionId, options) {
     const isTestCenter = isTestCenterChannel(options);
 
     const loginServerAddress = String(
         isTestCenter
-            ? (launcherConfig.launcherTcLoginServerAddress || launcherConfig.launcherLoginServerAddress || 'testcenter.swg-starforge.com')
+            ? (launcherConfig.launcherTcLoginServerAddress || 'testcenter.swg-starforge.com')
             : (launcherConfig.launcherLoginServerAddress || 'login.swg-starforge.com')
     ).trim();
 
     const loginServerPort = Number(
         isTestCenter
-            ? (launcherConfig.launcherTcLoginServerPort || launcherConfig.launcherLoginServerPort || 44453)
+            ? (launcherConfig.launcherTcLoginServerPort || 44453)
             : (launcherConfig.launcherLoginServerPort || 44553)
     );
 
@@ -159,82 +160,6 @@ async function createLocalGameSession(account, ipAddress, options) {
     };
 }
 
-async function createRemoteTcGameSession(account, ipAddress, options) {
-    const endpoint = String(launcherConfig.launcherTcSessionApiUrl || '').trim();
-
-    if (!endpoint) {
-        return {
-            success: false,
-            statusCode: 500,
-            message: 'Test Center session API URL is not configured.'
-        };
-    }
-
-    const sharedSecret = String(
-        launcherConfig.launcherTcSessionApiKey ||
-        launcherConfig.launcherTcSharedSecret ||
-        ''
-    ).trim();
-
-    const payload = {
-        username: String(account.username || ''),
-        accountId: Number(account.account_id || 0),
-        stationId: String(account.station_id || ''),
-        ipAddress: normalizeIpAddress(ipAddress),
-        channel: normalizeChannel(options)
-    };
-
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-
-    if (sharedSecret) {
-        headers['X-Starforge-Key'] = sharedSecret;
-    }
-
-    let response;
-    let json;
-
-    try {
-        response = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(payload)
-        });
-    } catch (error) {
-        return {
-            success: false,
-            statusCode: 502,
-            message: `Failed to reach Test Center session API: ${error.message}`
-        };
-    }
-
-    try {
-        json = await response.json();
-    } catch (error) {
-        return {
-            success: false,
-            statusCode: 502,
-            message: 'Test Center session API returned unreadable JSON.'
-        };
-    }
-
-    if (!response.ok || !json || !json.success || !json.data) {
-        return {
-            success: false,
-            statusCode: response.status || 502,
-            message: (json && json.message) || 'Test Center session API returned an error.'
-        };
-    }
-
-    return {
-        success: true,
-        statusCode: 200,
-        message: json.message || 'Test Center game session created.',
-        data: json.data
-    };
-}
-
 async function createGameSessionForUser(username, ipAddress, options) {
     const normalizedUsername = String(username || '').trim();
 
@@ -264,11 +189,31 @@ async function createGameSessionForUser(username, ipAddress, options) {
         };
     }
 
-    if (isTestCenterChannel(options)) {
-        return await createRemoteTcGameSession(account, ipAddress, options);
+    const requestedChannel = normalizeChannel(options);
+    const tcBot = isTcBotMode();
+
+    console.log('[Launcher Game Session] mode=%s requestedChannel=%s username=%s',
+        tcBot ? 'tc' : 'live',
+        requestedChannel,
+        normalizedUsername
+    );
+
+    // TC bot should always create its own local TC session.
+    if (tcBot) {
+        return await createLocalGameSession(account, ipAddress, { channel: 'TestCenter' });
     }
 
-    return await createLocalGameSession(account, ipAddress, options);
+    // Live bot should NEVER bridge to TC anymore.
+    if (requestedChannel === 'TestCenter') {
+        return {
+            success: false,
+            statusCode: 409,
+            message: 'Test Center sessions must be created by the Test Center bot directly.'
+        };
+    }
+
+    // Live bot creates local Live session.
+    return await createLocalGameSession(account, ipAddress, { channel: 'Live' });
 }
 
 module.exports = {
