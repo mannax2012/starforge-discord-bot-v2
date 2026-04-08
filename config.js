@@ -89,7 +89,7 @@ module.exports = {
     registrationMirror: {
         enabled: true,
         tcRegisterUrl: 'http://testcenter.swg-starforge.com:44567/api/internal/register-mirror',
-        tcSharedSecret: 'LAUNCHER_TC_SESSION_API_KEY'
+        tcSharedSecret: env('LAUNCHER_TC_SESSION_API_KEY', '')
     },
 
     serverStatus: {
