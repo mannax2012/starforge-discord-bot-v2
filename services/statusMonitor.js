@@ -245,6 +245,16 @@ function clampFailureCount(value) {
     return Math.max(0, Math.min(parsed, FAILURE_THRESHOLD));
 }
 
+function toLauncherStatusLabel(status) {
+    const normalized = String(status || '').trim().toLowerCase();
+
+    if (normalized === 'up' || normalized === 'degraded') {
+        return 'ONLINE';
+    }
+
+    return 'OFFLINE';
+}
+
 function getZoneServerNode(parsedXml) {
     if (!parsedXml || !isPlainObject(parsedXml)) {
         return null;
@@ -642,13 +652,7 @@ async function runStatusUpdate() {
         },
         serverName,
         status,
-        statusLabel: status === 'up'
-            ? 'ONLINE'
-            : status === 'degraded'
-                ? 'DEGRADED'
-                : status === 'down'
-                    ? 'OFFLINE'
-                    : 'UNKNOWN',
+        statusLabel: toLauncherStatusLabel(status),
         connectedUsers,
         playerCap,
         peakPlayers,
