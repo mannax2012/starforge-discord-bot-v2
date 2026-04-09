@@ -3,11 +3,12 @@ const path = require('path');
 const net = require('net');
 const config = require('../config');
 
-const FAILURE_THRESHOLD = 3;
 const DEFAULT_SERVER_NAME =
     String(config.mode || '').trim().toLowerCase() === 'tc' || config.isTcMode === true
         ? 'Starforge Test Center'
         : 'Starforge';
+const FAILURE_THRESHOLD = Math.max(1, Number(config.serverStatus && config.serverStatus.failureThreshold || 5));
+const KEEP_ALIVE_GRACE_MS = Math.max(0, Number(config.serverStatus && config.serverStatus.keepAliveGraceMs || 180000));
 
 function ensureDirectoryForFile(filePath) {
     const dir = path.dirname(filePath);
@@ -250,6 +251,10 @@ function getZoneServerNode(parsedXml) {
     return null;
 }
 
+function hasUsableZoneServer(parsedXml) {
+    return !!getZoneServerNode(parsedXml);
+}
+
 function summarizeParsedXml(parsedXml) {
     const zoneServer = getZoneServerNode(parsedXml) || {};
     const users = isPlainObject(zoneServer.users) ? zoneServer.users : {};
@@ -302,6 +307,20 @@ function parseStatusXml(rawXml) {
 
     try {
         const parsedXml = parseXmlToObject(cleanXml);
+
+        if (!hasUsableZoneServer(parsedXml)) {
+            return {
+                status: 'down',
+                connectedUsers: 0,
+                serverName: DEFAULT_SERVER_NAME,
+                rawXml: cleanXml,
+                xml: parsedXml,
+                summary: null,
+                probeError: 'XML response did not include a usable zoneServer node',
+                transportWarning: ''
+            };
+        }
+
         const summary = summarizeParsedXml(parsedXml || {});
 
         return {
@@ -326,6 +345,22 @@ function parseStatusXml(rawXml) {
             transportWarning: ''
         };
     }
+}
+
+function shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapshot, lastSuccessAt, now) {
+    if (previousStatus !== 'up' || !lastGoodSnapshot) {
+        return false;
+    }
+
+    if (consecutiveFailures < FAILURE_THRESHOLD) {
+        return true;
+    }
+
+    if (lastSuccessAt <= 0 || KEEP_ALIVE_GRACE_MS <= 0) {
+        return false;
+    }
+
+    return ((now - lastSuccessAt) * 1000) < KEEP_ALIVE_GRACE_MS;
 }
 
 function parseIfAnyData(raw, warningText) {
@@ -536,7 +571,7 @@ async function runStatusUpdate() {
     } else {
         consecutiveFailures += 1;
 
-        if (previousStatus === 'up' && consecutiveFailures < FAILURE_THRESHOLD && lastGoodSnapshot) {
+        if (shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapshot, lastSuccessAt, now)) {
             status = 'up';
             connectedUsers = toInt(lastGoodSnapshot.connectedUsers, 0);
             serverName = lastGoodSnapshot.serverName || DEFAULT_SERVER_NAME;
@@ -642,6 +677,7 @@ function startStatusMonitor() {
 
     console.log(`Status output path: ${resolvedOutputPath}`);
     console.log(`Status state path: ${resolvedStatePath}`);
+    console.log(`Status probe target: ${config.serverStatus.host}:${config.serverStatus.port} | interval=${config.serverStatus.intervalMs}ms | timeout=${config.serverStatus.timeoutMs}ms | failureThreshold=${FAILURE_THRESHOLD} | keepAliveGraceMs=${KEEP_ALIVE_GRACE_MS}`);
 
     let running = false;
     let hasPrintedInitialStatus = false;
@@ -665,7 +701,27 @@ function startStatusMonitor() {
         lastPrintedStatus = currentStatus;
         lastPrintedConnectedUsers = currentConnectedUsers;
 
-        console.log(`Status: ${currentStatus} | PlayersConnected: ${currentConnectedUsers}`);
+        const failureCount = Number(output && output.consecutiveFailures ? output.consecutiveFailures : 0);
+        const errorText = String(output && output.probeError ? output.probeError : '').trim();
+        const warningText = String(output && output.transportWarning ? output.transportWarning : '').trim();
+        const extras = [];
+
+        if (failureCount > 0) {
+            extras.push(`Failures=${failureCount}`);
+        }
+
+        if (errorText) {
+            extras.push(`ProbeError=${errorText}`);
+        }
+
+        if (warningText) {
+            extras.push(`Warning=${warningText}`);
+        }
+
+        console.log(
+            `Status: ${currentStatus} | PlayersConnected: ${currentConnectedUsers}` +
+            (extras.length ? ` | ${extras.join(' | ')}` : '')
+        );
     }
 
     async function tick() {

@@ -101,6 +101,8 @@ module.exports = {
         port: envInt('STATUS_PORT', isTcMode ? 44455 : 44555),
         timeoutMs: envInt('STATUS_TIMEOUT_MS', 7000),
         intervalMs: envInt('STATUS_INTERVAL_MS', 30000),
+        failureThreshold: envInt('STATUS_FAILURE_THRESHOLD', 5),
+        keepAliveGraceMs: envInt('STATUS_KEEPALIVE_GRACE_MS', 180000),
         outputPath: env(
             'STATUS_OUTPUT_PATH',
             isTcMode
