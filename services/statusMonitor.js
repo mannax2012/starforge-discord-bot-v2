@@ -240,6 +240,11 @@ function toInt(value, fallback) {
     return Number.isNaN(parsed) ? (fallback || 0) : parsed;
 }
 
+function clampFailureCount(value) {
+    const parsed = toInt(value, 0);
+    return Math.max(0, Math.min(parsed, FAILURE_THRESHOLD));
+}
+
 function getZoneServerNode(parsedXml) {
     if (!parsedXml || !isPlainObject(parsedXml)) {
         return null;
@@ -362,18 +367,6 @@ function shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapsho
     }
 
     return ((now - lastSuccessAt) * 1000) < KEEP_ALIVE_GRACE_MS;
-}
-
-function shouldHoldStatusUpDuringStartup(consecutiveFailures, now) {
-    if (consecutiveFailures < FAILURE_THRESHOLD) {
-        return true;
-    }
-
-    if (KEEP_ALIVE_GRACE_MS <= 0) {
-        return false;
-    }
-
-    return ((now - PROCESS_STARTED_AT_SECONDS) * 1000) < KEEP_ALIVE_GRACE_MS;
 }
 
 function parseIfAnyData(raw, warningText) {
@@ -529,9 +522,9 @@ async function runStatusUpdate() {
     let maxConnectedUsers = toInt(state.maxConnectedUsers, 0);
     let lastSuccessAt = toInt(state.lastSuccessAt, 0);
     let lastGoodSnapshot = state.lastGoodSnapshot || null;
-    let consecutiveFailures = toInt(state.consecutiveFailures, 0);
+    let consecutiveFailures = clampFailureCount(state.consecutiveFailures);
 
-    let status = 'down';
+    let status = 'unknown';
     let connectedUsers = 0;
     let serverName = DEFAULT_SERVER_NAME;
     let probeError = probe.probeError || '';
@@ -544,8 +537,8 @@ async function runStatusUpdate() {
     let totalPlayers = 0;
     let deletedPlayers = 0;
 
-    if (probe.status === 'up' && probe.summary) {
-        status = 'up';
+    if (probe.summary) {
+        status = normalizeStatus(probe.summary.status || probe.status || 'up', 'up');
         consecutiveFailures = 0;
         connectedUsers = toInt(probe.summary.connectedUsers, 0);
         serverName = probe.summary.serverName || DEFAULT_SERVER_NAME;
@@ -558,31 +551,35 @@ async function runStatusUpdate() {
         deletedPlayers = toInt(probe.summary.deletedPlayers, 0);
         lastSuccessAt = now;
 
-        if (probe.summary.explicitServerStartTime > 0) {
-            serverStartTime = probe.summary.explicitServerStartTime;
-        } else if (probe.summary.explicitUptimeSeconds > 0) {
-            serverStartTime = now - probe.summary.explicitUptimeSeconds;
-        } else if (previousStatus !== 'up' || serverStartTime <= 0) {
-            serverStartTime = now;
-        }
+        if (status === 'up') {
+            if (probe.summary.explicitServerStartTime > 0) {
+                serverStartTime = probe.summary.explicitServerStartTime;
+            } else if (probe.summary.explicitUptimeSeconds > 0) {
+                serverStartTime = now - probe.summary.explicitUptimeSeconds;
+            } else if (previousStatus !== 'up' || serverStartTime <= 0) {
+                serverStartTime = now;
+            }
 
-        if (connectedUsers > maxConnectedUsers) {
-            maxConnectedUsers = connectedUsers;
-        }
+            if (connectedUsers > maxConnectedUsers) {
+                maxConnectedUsers = connectedUsers;
+            }
 
-        lastGoodSnapshot = {
-            serverName,
-            connectedUsers,
-            playerCap,
-            peakPlayers,
-            totalPlayers,
-            deletedPlayers,
-            summary,
-            xml,
-            rawXml
-        };
+            lastGoodSnapshot = {
+                serverName,
+                connectedUsers,
+                playerCap,
+                peakPlayers,
+                totalPlayers,
+                deletedPlayers,
+                summary,
+                xml,
+                rawXml
+            };
+        } else {
+            serverStartTime = 0;
+        }
     } else {
-        consecutiveFailures += 1;
+        consecutiveFailures = clampFailureCount(consecutiveFailures + 1);
 
         if (shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapshot, lastSuccessAt, now)) {
             status = 'up';
@@ -595,49 +592,42 @@ async function runStatusUpdate() {
             peakPlayers = toInt(lastGoodSnapshot.peakPlayers, 0);
             totalPlayers = toInt(lastGoodSnapshot.totalPlayers, 0);
             deletedPlayers = toInt(lastGoodSnapshot.deletedPlayers, 0);
-        } else if (shouldHoldStatusUpDuringStartup(consecutiveFailures, now)) {
-            status = 'up';
-            connectedUsers = 0;
-            serverName = DEFAULT_SERVER_NAME;
-            summary = {
-                status: 'up',
-                serverName: DEFAULT_SERVER_NAME,
-                connectedUsers: 0,
-                playerCap: 0,
-                peakPlayers: 0,
-                totalPlayers: 0,
-                deletedPlayers: 0,
-                explicitServerStartTime: serverStartTime > 0 ? serverStartTime : now,
-                explicitUptimeSeconds: serverStartTime > 0 ? Math.max(0, now - serverStartTime) : 0,
-                timestampMs: now * 1000,
-                motd: '',
-                version: ''
-            };
-            xml = null;
-            rawXml = '';
-            playerCap = 0;
-            peakPlayers = 0;
-            totalPlayers = 0;
-            deletedPlayers = 0;
+        } else {
+            status = 'degraded';
+            serverName = lastGoodSnapshot && lastGoodSnapshot.serverName
+                ? lastGoodSnapshot.serverName
+                : DEFAULT_SERVER_NAME;
+            connectedUsers = lastGoodSnapshot ? toInt(lastGoodSnapshot.connectedUsers, 0) : 0;
+            playerCap = lastGoodSnapshot ? toInt(lastGoodSnapshot.playerCap, 0) : 0;
+            peakPlayers = lastGoodSnapshot ? toInt(lastGoodSnapshot.peakPlayers, 0) : 0;
+            totalPlayers = lastGoodSnapshot ? toInt(lastGoodSnapshot.totalPlayers, 0) : 0;
+            deletedPlayers = lastGoodSnapshot ? toInt(lastGoodSnapshot.deletedPlayers, 0) : 0;
+            summary = lastGoodSnapshot && lastGoodSnapshot.summary
+                ? Object.assign({}, lastGoodSnapshot.summary, { status: 'degraded' })
+                : {
+                    status: 'degraded',
+                    serverName,
+                    connectedUsers,
+                    playerCap,
+                    peakPlayers,
+                    totalPlayers,
+                    deletedPlayers,
+                    explicitServerStartTime: serverStartTime > 0 ? serverStartTime : PROCESS_STARTED_AT_SECONDS,
+                    explicitUptimeSeconds: serverStartTime > 0 ? Math.max(0, now - serverStartTime) : 0,
+                    timestampMs: now * 1000,
+                    motd: '',
+                    version: ''
+                };
+            xml = lastGoodSnapshot ? (lastGoodSnapshot.xml || null) : null;
+            rawXml = lastGoodSnapshot ? (lastGoodSnapshot.rawXml || '') : '';
 
             if (serverStartTime <= 0) {
-                serverStartTime = now;
+                serverStartTime = PROCESS_STARTED_AT_SECONDS;
             }
-        } else {
-            status = 'down';
-            connectedUsers = 0;
-            serverStartTime = 0;
-            summary = null;
-            xml = null;
-            rawXml = '';
-            playerCap = 0;
-            peakPlayers = 0;
-            totalPlayers = 0;
-            deletedPlayers = 0;
         }
     }
 
-    const uptimeSeconds = status === 'up' && serverStartTime > 0
+    const uptimeSeconds = (status === 'up' || status === 'degraded') && serverStartTime > 0
         ? Math.max(0, now - serverStartTime)
         : 0;
 
@@ -652,7 +642,13 @@ async function runStatusUpdate() {
         },
         serverName,
         status,
-        statusLabel: status === 'up' ? 'ONLINE' : 'OFFLINE',
+        statusLabel: status === 'up'
+            ? 'ONLINE'
+            : status === 'degraded'
+                ? 'DEGRADED'
+                : status === 'down'
+                    ? 'OFFLINE'
+                    : 'UNKNOWN',
         connectedUsers,
         playerCap,
         peakPlayers,
