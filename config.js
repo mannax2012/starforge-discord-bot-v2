@@ -98,7 +98,7 @@ module.exports = {
     serverStatus: {
         enabled: statusEnabled,
         host: env('STATUS_HOST', '127.0.0.1'),
-        port: envInt('STATUS_PORT', isTcMode ? 44455 : 44555),
+        port: envInt('STATUS_PORT', isTcMode ? 44465 : 44555),
         timeoutMs: envInt('STATUS_TIMEOUT_MS', 7000),
         intervalMs: envInt('STATUS_INTERVAL_MS', 30000),
         failureThreshold: envInt('STATUS_FAILURE_THRESHOLD', 5),
