@@ -255,6 +255,11 @@ function toLauncherStatusLabel(status) {
     return 'OFFLINE';
 }
 
+function toLegacyStatus(status) {
+    const normalized = String(status || '').trim().toLowerCase();
+    return normalized === 'up' || normalized === 'degraded' ? 'up' : 'down';
+}
+
 function getZoneServerNode(parsedXml) {
     if (!parsedXml || !isPlainObject(parsedXml)) {
         return null;
@@ -641,6 +646,7 @@ async function runStatusUpdate() {
         ? Math.max(0, now - serverStartTime)
         : 0;
 
+    const legacyStatus = toLegacyStatus(status);
     const output = {
         schemaVersion: 3,
         generatedAt: new Date().toISOString(),
@@ -651,7 +657,8 @@ async function runStatusUpdate() {
             timeoutMs: config.serverStatus.timeoutMs
         },
         serverName,
-        status,
+        status: legacyStatus,
+        healthState: status,
         statusLabel: toLauncherStatusLabel(status),
         connectedUsers,
         playerCap,
@@ -673,7 +680,7 @@ async function runStatusUpdate() {
             highWater: maxConnectedUsers
         },
         summary: summary || {
-            status,
+            status: legacyStatus,
             serverName,
             connectedUsers,
             playerCap: 0,
