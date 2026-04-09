@@ -87,11 +87,13 @@ module.exports = {
     },
 
     registrationMirror: {
-        enabled: true,
-        tcRegisterUrl: 'http://testcenter.swg-starforge.com:44567/api/internal/register-mirror',
-        tcActivateUrl: 'http://testcenter.swg-starforge.com:44567/api/internal/activate-mirror',
-        tcSharedSecret: env('LAUNCHER_TC_SESSION_API_KEY', '')
-        },
+        enabled: envBool('TC_MIRROR_ENABLED', true),
+        tcRegisterUrl: env('TC_REGISTER_MIRROR_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/register-mirror'),
+        tcActivateUrl: env('TC_ACTIVATE_MIRROR_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/activate-mirror'),
+        tcStatusUrl: env('TC_ACCOUNT_STATUS_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/account-status'),
+        tcImportUrl: env('TC_ACCOUNT_IMPORT_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/import-account'),
+        tcSharedSecret: env('TC_SHARED_SECRET', env('LAUNCHER_TC_SESSION_API_KEY', ''))
+    },
 
     serverStatus: {
         enabled: statusEnabled,

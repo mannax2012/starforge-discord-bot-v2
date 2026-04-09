@@ -1,5 +1,7 @@
+const crypto = require('crypto');
 const express = require('express');
 const config = require('./config');
+const pool = require('./services/database');
 const { verifyLogin } = require('./services/accountAuth');
 const { registerUser } = require('./services/registerAccount');
 const { postActivationReview } = require('./services/activationReview');
@@ -292,6 +294,303 @@ async function maybePostActivationReview(client, payload) {
 
 let apiStarted = false;
 
+async function loadLocalAccountForSync(username) {
+    const normalizedUsername = String(username || '').trim();
+
+    const [accountRows] = await pool.execute(
+        `SELECT username, password, salt, station_id, active, admin_level
+         FROM accounts
+         WHERE username = ?
+         LIMIT 1`,
+        [normalizedUsername]
+    );
+
+    if (!accountRows.length) {
+        return null;
+    }
+
+    const account = accountRows[0];
+
+    const [registerRows] = await pool.execute(
+        `SELECT email, reghash
+         FROM register
+         WHERE username = ?
+         LIMIT 1`,
+        [normalizedUsername]
+    );
+
+    const registerRow = registerRows.length ? registerRows[0] : null;
+
+    return {
+        username: String(account.username || ''),
+        passwordHash: String(account.password || ''),
+        salt: String(account.salt || ''),
+        stationId: account.station_id != null ? String(account.station_id) : '',
+        active: Number(account.active || 0),
+        adminLevel: Number(account.admin_level || 0),
+        email: registerRow ? String(registerRow.email || '') : '',
+        regHash: registerRow ? String(registerRow.reghash || '') : ''
+    };
+}
+
+function buildModeAccountSummary(account) {
+    if (!account) {
+        return {
+            exists: false,
+            active: false,
+            stationId: '',
+            email: ''
+        };
+    }
+
+    return {
+        exists: true,
+        active: Number(account.active || 0) === 1,
+        stationId: account.stationId || '',
+        email: account.email || ''
+    };
+}
+
+async function importAccountIntoCurrentMode(payload) {
+    if (!config.isTcMode) {
+        return {
+            success: false,
+            statusCode: 403,
+            message: 'Account import is only allowed in TC mode.',
+            data: null
+        };
+    }
+
+    const normalizedUsername = String(payload && payload.username || '').trim();
+    const passwordHash = String(payload && payload.passwordHash || '').trim();
+    const salt = String(payload && payload.salt || '').trim();
+    const email = String(payload && payload.email || '').trim();
+    const regHash = String(payload && payload.regHash || '').trim() || crypto.randomBytes(16).toString('hex');
+    const stationIdRaw = String(payload && payload.stationId || '').trim();
+    const stationId = stationIdRaw === '' ? null : Number.parseInt(stationIdRaw, 10);
+    const active = Number(payload && payload.active || 0) === 1 ? 1 : 0;
+    const adminLevel = Number.parseInt(payload && payload.adminLevel, 10);
+    const normalizedAdminLevel = Number.isNaN(adminLevel) ? 0 : adminLevel;
+
+    if (!normalizedUsername) {
+        return {
+            success: false,
+            statusCode: 400,
+            message: 'Username is required.',
+            data: null
+        };
+    }
+
+    if (!passwordHash || !salt) {
+        return {
+            success: false,
+            statusCode: 400,
+            message: 'Password hash and salt are required.',
+            data: null
+        };
+    }
+
+    if (stationIdRaw !== '' && Number.isNaN(stationId)) {
+        return {
+            success: false,
+            statusCode: 400,
+            message: 'Station ID must be numeric when provided.',
+            data: null
+        };
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        const [existingAccountRows] = await connection.execute(
+            `SELECT username, active, station_id
+             FROM accounts
+             WHERE username = ?
+             LIMIT 1`,
+            [normalizedUsername]
+        );
+
+        if (existingAccountRows.length) {
+            await connection.rollback();
+
+            const existingAccount = existingAccountRows[0];
+            const [existingRegisterRows] = await connection.execute(
+                `SELECT email
+                 FROM register
+                 WHERE username = ?
+                 LIMIT 1`,
+                [normalizedUsername]
+            );
+
+            return {
+                success: true,
+                statusCode: 200,
+                message: 'TC account already exists. No import was needed.',
+                data: {
+                    username: normalizedUsername,
+                    created: false,
+                    alreadyExisted: true,
+                    active: Number(existingAccount.active || 0) === 1,
+                    stationId: existingAccount.station_id != null ? String(existingAccount.station_id) : '',
+                    email: existingRegisterRows.length ? String(existingRegisterRows[0].email || '') : ''
+                }
+            };
+        }
+
+        await connection.execute(
+            `INSERT INTO accounts (username, password, station_id, salt, active, admin_level)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [normalizedUsername, passwordHash, stationId, salt, active, normalizedAdminLevel]
+        );
+
+        await connection.execute(
+            `INSERT INTO register (username, email, reghash)
+             VALUES (?, ?, ?)`,
+            [normalizedUsername, email, regHash]
+        );
+
+        await connection.commit();
+
+        return {
+            success: true,
+            statusCode: 201,
+            message: 'TC account imported successfully.',
+            data: {
+                username: normalizedUsername,
+                created: true,
+                alreadyExisted: false,
+                active: active === 1,
+                stationId: stationId != null ? String(stationId) : '',
+                email
+            }
+        };
+    } catch (error) {
+        await connection.rollback();
+        throw error;
+    } finally {
+        connection.release();
+    }
+}
+
+async function queryTcAccountStatus(username) {
+    const endpoint = String((config.registrationMirror && config.registrationMirror.tcStatusUrl) || '').trim();
+    const sharedSecret = String((config.registrationMirror && config.registrationMirror.tcSharedSecret) || '').trim();
+
+    if (!endpoint) {
+        return {
+            success: false,
+            message: 'TC status API URL is not configured.',
+            data: null
+        };
+    }
+
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+
+    if (sharedSecret) {
+        headers['X-Starforge-Key'] = sharedSecret;
+    }
+
+    let response;
+    let json;
+
+    try {
+        response = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ username: String(username || '').trim() })
+        });
+    } catch (error) {
+        return {
+            success: false,
+            message: `Failed to reach TC status API: ${error.message}`,
+            data: null
+        };
+    }
+
+    try {
+        json = await response.json();
+    } catch (error) {
+        return {
+            success: false,
+            message: 'TC status API returned unreadable JSON.',
+            data: null
+        };
+    }
+
+    return {
+        success: !!json.success,
+        message: json.message || '',
+        data: json.data || null
+    };
+}
+
+async function syncLiveAccountToTc(username) {
+    const endpoint = String((config.registrationMirror && config.registrationMirror.tcImportUrl) || '').trim();
+    const sharedSecret = String((config.registrationMirror && config.registrationMirror.tcSharedSecret) || '').trim();
+
+    if (!endpoint) {
+        return {
+            success: false,
+            message: 'TC import API URL is not configured.'
+        };
+    }
+
+    const liveAccount = await loadLocalAccountForSync(username);
+    if (!liveAccount) {
+        return {
+            success: false,
+            statusCode: 404,
+            message: 'Live account not found.'
+        };
+    }
+
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+
+    if (sharedSecret) {
+        headers['X-Starforge-Key'] = sharedSecret;
+    }
+
+    let response;
+    let json;
+
+    try {
+        response = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(liveAccount)
+        });
+    } catch (error) {
+        return {
+            success: false,
+            statusCode: 502,
+            message: `Failed to reach TC import API: ${error.message}`
+        };
+    }
+
+    try {
+        json = await response.json();
+    } catch (error) {
+        return {
+            success: false,
+            statusCode: 502,
+            message: 'TC import API returned unreadable JSON.'
+        };
+    }
+
+    return {
+        success: !!json.success,
+        statusCode: response.status || 500,
+        message: json.message || 'TC import completed.',
+        data: json.data || null
+    };
+}
+
 function startWebApi(client) {
     if (apiStarted) {
         console.log('Starforge Web API already started. Skipping duplicate start.');
@@ -319,6 +618,104 @@ function startWebApi(client) {
             message: 'Starforge API is online.'
         });
     });
+
+    app.post('/api/admin/account-sync-status', requireSharedSecret, async function (req, res) {
+    try {
+        if (config.isTcMode) {
+            return res.status(403).json({
+                success: false,
+                message: 'Account sync status is only available from the Live API instance.',
+                data: null
+            });
+        }
+
+        const username = req.body ? req.body.username : '';
+        const normalizedUsername = String(username || '').trim();
+
+        if (!normalizedUsername) {
+            return res.status(400).json({
+                success: false,
+                message: 'Username is required.',
+                data: null
+            });
+        }
+
+        const liveAccount = await loadLocalAccountForSync(normalizedUsername);
+        const tcStatus = await queryTcAccountStatus(normalizedUsername);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Account sync status loaded.',
+            data: {
+                username: normalizedUsername,
+                live: buildModeAccountSummary(liveAccount),
+                tc: tcStatus.success && tcStatus.data ? {
+                    exists: !!tcStatus.data.exists,
+                    active: !!tcStatus.data.active,
+                    stationId: tcStatus.data.stationId || '',
+                    email: tcStatus.data.email || ''
+                } : {
+                    exists: false,
+                    active: false,
+                    stationId: '',
+                    email: ''
+                }
+            }
+        });
+    } catch (error) {
+        console.error('[API Admin Account Sync Status] ERROR', error);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Internal account sync status error.',
+            data: null
+        });
+    }
+});
+
+app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (req, res) {
+    try {
+        if (config.isTcMode) {
+            return res.status(403).json({
+                success: false,
+                message: 'Account syncing to TC is only available from the Live API instance.',
+                data: null
+            });
+        }
+
+        const username = req.body ? req.body.username : '';
+
+        console.log('[API Admin Sync Account To TC] Request received', {
+            username,
+            mode: config.mode || 'live',
+            isTcMode: config.isTcMode === true
+        });
+
+        const result = await syncLiveAccountToTc(username);
+
+        console.log('[API Admin Sync Account To TC] Result', {
+            username,
+            success: result.success,
+            statusCode: result.statusCode,
+            message: result.message,
+            data: result.data || null
+        });
+
+        return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+            success: result.success,
+            message: result.message,
+            data: result.data || null
+        });
+    } catch (error) {
+        console.error('[API Admin Sync Account To TC] ERROR', error);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Internal account sync error.',
+            data: null
+        });
+    }
+});
 
     app.get('/api/status/current', requireSharedSecret, function (req, res) {
         try {
@@ -514,6 +911,68 @@ function startWebApi(client) {
             return res.status(500).json({
                 success: false,
                 message: 'Internal mirror registration error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/internal/account-status', requireSharedSecret, async function (req, res) {
+        try {
+            if (!config.isTcMode) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Internal account status route is only available in TC mode.',
+                    data: null
+                });
+            }
+
+            const username = req.body ? req.body.username : '';
+            const normalizedUsername = String(username || '').trim();
+
+            if (!normalizedUsername) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Username is required.',
+                    data: null
+                });
+            }
+
+            const account = await loadLocalAccountForSync(normalizedUsername);
+
+            return res.status(200).json({
+                success: true,
+                message: account ? 'TC account status loaded.' : 'TC account was not found.',
+                data: {
+                    username: normalizedUsername,
+                    ...buildModeAccountSummary(account)
+                }
+            });
+        } catch (error) {
+            console.error('[API Internal Account Status] ERROR', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal account status error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/internal/import-account', requireSharedSecret, async function (req, res) {
+        try {
+            const result = await importAccountIntoCurrentMode(req.body || {});
+
+            return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error('[API Internal Import Account] ERROR', error);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal account import error.',
                 data: null
             });
         }
