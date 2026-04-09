@@ -371,6 +371,7 @@ async function importAccountIntoCurrentMode(payload) {
     const active = Number(payload && payload.active || 0) === 1 ? 1 : 0;
     const adminLevel = Number.parseInt(payload && payload.adminLevel, 10);
     const normalizedAdminLevel = Number.isNaN(adminLevel) ? 0 : adminLevel;
+    const overwriteTc = Boolean(payload && payload.overwriteTc);
 
     if (!normalizedUsername) {
         return {
@@ -413,8 +414,6 @@ async function importAccountIntoCurrentMode(payload) {
         );
 
         if (existingAccountRows.length) {
-            await connection.rollback();
-
             const existingAccount = existingAccountRows[0];
             const [existingRegisterRows] = await connection.execute(
                 `SELECT email
@@ -424,17 +423,65 @@ async function importAccountIntoCurrentMode(payload) {
                 [normalizedUsername]
             );
 
+            if (!overwriteTc) {
+                await connection.rollback();
+
+                return {
+                    success: true,
+                    statusCode: 200,
+                    message: 'TC account already exists. No import was needed.',
+                    data: {
+                        username: normalizedUsername,
+                        created: false,
+                        updated: false,
+                        overwriteApplied: false,
+                        alreadyExisted: true,
+                        active: Number(existingAccount.active || 0) === 1,
+                        stationId: existingAccount.station_id != null ? String(existingAccount.station_id) : '',
+                        email: existingRegisterRows.length ? String(existingRegisterRows[0].email || '') : ''
+                    }
+                };
+            }
+
+            await connection.execute(
+                `UPDATE accounts
+                 SET password = ?, station_id = ?, salt = ?, active = ?, admin_level = ?
+                 WHERE username = ?
+                 LIMIT 1`,
+                [passwordHash, stationId, salt, active, normalizedAdminLevel, normalizedUsername]
+            );
+
+            if (existingRegisterRows.length) {
+                await connection.execute(
+                    `UPDATE register
+                     SET email = ?, reghash = ?
+                     WHERE username = ?
+                     LIMIT 1`,
+                    [email, regHash, normalizedUsername]
+                );
+            } else {
+                await connection.execute(
+                    `INSERT INTO register (username, email, reghash)
+                     VALUES (?, ?, ?)`,
+                    [normalizedUsername, email, regHash]
+                );
+            }
+
+            await connection.commit();
+
             return {
                 success: true,
                 statusCode: 200,
-                message: 'TC account already exists. No import was needed.',
+                message: 'TC account overwritten from Live successfully.',
                 data: {
                     username: normalizedUsername,
                     created: false,
+                    updated: true,
+                    overwriteApplied: true,
                     alreadyExisted: true,
-                    active: Number(existingAccount.active || 0) === 1,
-                    stationId: existingAccount.station_id != null ? String(existingAccount.station_id) : '',
-                    email: existingRegisterRows.length ? String(existingRegisterRows[0].email || '') : ''
+                    active: active === 1,
+                    stationId: stationId != null ? String(stationId) : '',
+                    email
                 }
             };
         }
@@ -460,6 +507,8 @@ async function importAccountIntoCurrentMode(payload) {
             data: {
                 username: normalizedUsername,
                 created: true,
+                updated: false,
+                overwriteApplied: false,
                 alreadyExisted: false,
                 active: active === 1,
                 stationId: stationId != null ? String(stationId) : '',
@@ -528,9 +577,11 @@ async function queryTcAccountStatus(username) {
     };
 }
 
-async function syncLiveAccountToTc(username) {
+async function syncLiveAccountToTc(username, options) {
     const endpoint = String((config.registrationMirror && config.registrationMirror.tcImportUrl) || '').trim();
     const sharedSecret = String((config.registrationMirror && config.registrationMirror.tcSharedSecret) || '').trim();
+    const opts = options || {};
+    const overwriteTc = Boolean(opts.overwriteTc);
 
     if (!endpoint) {
         return {
@@ -563,7 +614,10 @@ async function syncLiveAccountToTc(username) {
         response = await fetch(endpoint, {
             method: 'POST',
             headers,
-            body: JSON.stringify(liveAccount)
+            body: JSON.stringify({
+                ...liveAccount,
+                overwriteTc
+            })
         });
     } catch (error) {
         return {
@@ -684,14 +738,18 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
         }
 
         const username = req.body ? req.body.username : '';
+        const overwriteTc = Boolean(req.body && req.body.overwriteTc);
 
         console.log('[API Admin Sync Account To TC] Request received', {
             username,
+            overwriteTc,
             mode: config.mode || 'live',
             isTcMode: config.isTcMode === true
         });
 
-        const result = await syncLiveAccountToTc(username);
+        const result = await syncLiveAccountToTc(username, {
+            overwriteTc
+        });
 
         console.log('[API Admin Sync Account To TC] Result', {
             username,
