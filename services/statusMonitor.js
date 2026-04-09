@@ -9,6 +9,7 @@ const DEFAULT_SERVER_NAME =
         : 'Starforge';
 const FAILURE_THRESHOLD = Math.max(1, Number(config.serverStatus && config.serverStatus.failureThreshold || 5));
 const KEEP_ALIVE_GRACE_MS = Math.max(0, Number(config.serverStatus && config.serverStatus.keepAliveGraceMs || 180000));
+const PROCESS_STARTED_AT_SECONDS = Math.floor(Date.now() / 1000);
 
 function ensureDirectoryForFile(filePath) {
     const dir = path.dirname(filePath);
@@ -363,6 +364,22 @@ function shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapsho
     return ((now - lastSuccessAt) * 1000) < KEEP_ALIVE_GRACE_MS;
 }
 
+function shouldHoldStatusUpDuringStartup(previousStatus, consecutiveFailures, now) {
+    if (previousStatus !== 'up') {
+        return false;
+    }
+
+    if (consecutiveFailures < FAILURE_THRESHOLD) {
+        return true;
+    }
+
+    if (KEEP_ALIVE_GRACE_MS <= 0) {
+        return false;
+    }
+
+    return ((now - PROCESS_STARTED_AT_SECONDS) * 1000) < KEEP_ALIVE_GRACE_MS;
+}
+
 function parseIfAnyData(raw, warningText) {
     if (String(raw || '').trim() === '') {
         return null;
@@ -582,6 +599,34 @@ async function runStatusUpdate() {
             peakPlayers = toInt(lastGoodSnapshot.peakPlayers, 0);
             totalPlayers = toInt(lastGoodSnapshot.totalPlayers, 0);
             deletedPlayers = toInt(lastGoodSnapshot.deletedPlayers, 0);
+        } else if (shouldHoldStatusUpDuringStartup(previousStatus, consecutiveFailures, now)) {
+            status = 'up';
+            connectedUsers = 0;
+            serverName = DEFAULT_SERVER_NAME;
+            summary = {
+                status: 'up',
+                serverName: DEFAULT_SERVER_NAME,
+                connectedUsers: 0,
+                playerCap: 0,
+                peakPlayers: 0,
+                totalPlayers: 0,
+                deletedPlayers: 0,
+                explicitServerStartTime: serverStartTime > 0 ? serverStartTime : now,
+                explicitUptimeSeconds: serverStartTime > 0 ? Math.max(0, now - serverStartTime) : 0,
+                timestampMs: now * 1000,
+                motd: '',
+                version: ''
+            };
+            xml = null;
+            rawXml = '';
+            playerCap = 0;
+            peakPlayers = 0;
+            totalPlayers = 0;
+            deletedPlayers = 0;
+
+            if (serverStartTime <= 0) {
+                serverStartTime = now;
+            }
         } else {
             status = 'down';
             connectedUsers = 0;
