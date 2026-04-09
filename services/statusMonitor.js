@@ -364,11 +364,7 @@ function shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapsho
     return ((now - lastSuccessAt) * 1000) < KEEP_ALIVE_GRACE_MS;
 }
 
-function shouldHoldStatusUpDuringStartup(previousStatus, consecutiveFailures, now) {
-    if (previousStatus !== 'up') {
-        return false;
-    }
-
+function shouldHoldStatusUpDuringStartup(consecutiveFailures, now) {
     if (consecutiveFailures < FAILURE_THRESHOLD) {
         return true;
     }
@@ -599,7 +595,7 @@ async function runStatusUpdate() {
             peakPlayers = toInt(lastGoodSnapshot.peakPlayers, 0);
             totalPlayers = toInt(lastGoodSnapshot.totalPlayers, 0);
             deletedPlayers = toInt(lastGoodSnapshot.deletedPlayers, 0);
-        } else if (shouldHoldStatusUpDuringStartup(previousStatus, consecutiveFailures, now)) {
+        } else if (shouldHoldStatusUpDuringStartup(consecutiveFailures, now)) {
             status = 'up';
             connectedUsers = 0;
             serverName = DEFAULT_SERVER_NAME;
