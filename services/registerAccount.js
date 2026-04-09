@@ -21,6 +21,22 @@ function isTcMode() {
     return mode === 'tc' || mode === 'testcenter' || config.isTcMode === true;
 }
 
+async function generateUniqueStationId(connection, maxAttempts = 25) {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const stationId = crypto.randomInt(100000, 999999999);
+        const [rows] = await connection.execute(
+            'SELECT COUNT(*) AS count FROM accounts WHERE station_id = ? LIMIT 1',
+            [stationId]
+        );
+
+        if (Number(rows[0] && rows[0].count || 0) === 0) {
+            return stationId;
+        }
+    }
+
+    throw new Error('Unable to allocate a unique station ID.');
+}
+
 async function mirrorAccountToTc(username, password, email) {
     const mirrorConfig = config.registrationMirror || {};
     const endpoint = String(mirrorConfig.tcRegisterUrl || '').trim();
@@ -192,7 +208,7 @@ async function registerUser(username, password, email, client, message, options)
             return { success: false, statusCode: 409, message: 'Email already exists.' };
         }
 
-        const stationId = crypto.randomInt(100000, 999999999);
+        const stationId = await generateUniqueStationId(connection);
         const salt = makeSalt(stationId);
         const passwordHash = makePasswordHash(password, salt);
         const regHash = crypto.randomBytes(16).toString('hex');
@@ -286,5 +302,6 @@ async function registerUser(username, password, email, client, message, options)
 }
 
 module.exports = {
-    registerUser
+    registerUser,
+    generateUniqueStationId
 };

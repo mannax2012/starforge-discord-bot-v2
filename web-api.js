@@ -3,7 +3,7 @@ const express = require('express');
 const config = require('./config');
 const pool = require('./services/database');
 const { verifyLogin } = require('./services/accountAuth');
-const { registerUser } = require('./services/registerAccount');
+const { registerUser, generateUniqueStationId } = require('./services/registerAccount');
 const { postActivationReview } = require('./services/activationReview');
 const {
     getAccountProfile,
@@ -366,8 +366,7 @@ async function importAccountIntoCurrentMode(payload) {
     const salt = String(payload && payload.salt || '').trim();
     const email = String(payload && payload.email || '').trim();
     const regHash = String(payload && payload.regHash || '').trim() || crypto.randomBytes(16).toString('hex');
-    const stationIdRaw = String(payload && payload.stationId || '').trim();
-    const stationId = stationIdRaw === '' ? null : Number.parseInt(stationIdRaw, 10);
+    const liveStationId = String(payload && payload.stationId || '').trim();
     const active = Number(payload && payload.active || 0) === 1 ? 1 : 0;
     const adminLevel = Number.parseInt(payload && payload.adminLevel, 10);
     const normalizedAdminLevel = Number.isNaN(adminLevel) ? 0 : adminLevel;
@@ -387,15 +386,6 @@ async function importAccountIntoCurrentMode(payload) {
             success: false,
             statusCode: 400,
             message: 'Password hash and salt are required.',
-            data: null
-        };
-    }
-
-    if (stationIdRaw !== '' && Number.isNaN(stationId)) {
-        return {
-            success: false,
-            statusCode: 400,
-            message: 'Station ID must be numeric when provided.',
             data: null
         };
     }
@@ -438,17 +428,25 @@ async function importAccountIntoCurrentMode(payload) {
                         alreadyExisted: true,
                         active: Number(existingAccount.active || 0) === 1,
                         stationId: existingAccount.station_id != null ? String(existingAccount.station_id) : '',
-                        email: existingRegisterRows.length ? String(existingRegisterRows[0].email || '') : ''
+                        email: existingRegisterRows.length ? String(existingRegisterRows[0].email || '') : '',
+                        liveStationId
                     }
                 };
             }
+
+            const existingStationId = existingAccount.station_id != null
+                ? Number.parseInt(existingAccount.station_id, 10)
+                : null;
+            const tcStationId = Number.isInteger(existingStationId) && existingStationId > 0
+                ? existingStationId
+                : await generateUniqueStationId(connection);
 
             await connection.execute(
                 `UPDATE accounts
                  SET password = ?, station_id = ?, salt = ?, active = ?, admin_level = ?
                  WHERE username = ?
                  LIMIT 1`,
-                [passwordHash, stationId, salt, active, normalizedAdminLevel, normalizedUsername]
+                [passwordHash, tcStationId, salt, active, normalizedAdminLevel, normalizedUsername]
             );
 
             if (existingRegisterRows.length) {
@@ -472,7 +470,7 @@ async function importAccountIntoCurrentMode(payload) {
             return {
                 success: true,
                 statusCode: 200,
-                message: 'TC account overwritten from Live successfully.',
+                message: 'TC account synced from Live successfully while preserving its TC station ID.',
                 data: {
                     username: normalizedUsername,
                     created: false,
@@ -480,16 +478,19 @@ async function importAccountIntoCurrentMode(payload) {
                     overwriteApplied: true,
                     alreadyExisted: true,
                     active: active === 1,
-                    stationId: stationId != null ? String(stationId) : '',
-                    email
+                    stationId: String(tcStationId),
+                    email,
+                    liveStationId
                 }
             };
         }
 
+        const tcStationId = await generateUniqueStationId(connection);
+
         await connection.execute(
             `INSERT INTO accounts (username, password, station_id, salt, active, admin_level)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            [normalizedUsername, passwordHash, stationId, salt, active, normalizedAdminLevel]
+            [normalizedUsername, passwordHash, tcStationId, salt, active, normalizedAdminLevel]
         );
 
         await connection.execute(
@@ -503,7 +504,7 @@ async function importAccountIntoCurrentMode(payload) {
         return {
             success: true,
             statusCode: 201,
-            message: 'TC account imported successfully.',
+            message: 'TC account synced successfully with a TC-generated station ID.',
             data: {
                 username: normalizedUsername,
                 created: true,
@@ -511,8 +512,9 @@ async function importAccountIntoCurrentMode(payload) {
                 overwriteApplied: false,
                 alreadyExisted: false,
                 active: active === 1,
-                stationId: stationId != null ? String(stationId) : '',
-                email
+                stationId: String(tcStationId),
+                email,
+                liveStationId
             }
         };
     } catch (error) {
