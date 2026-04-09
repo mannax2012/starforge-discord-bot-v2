@@ -64,7 +64,7 @@ module.exports = {
 
     webListener: {
         enabled: webApiEnabled,
-        port: envInt('WEB_LISTENER_PORT', isTcMode ? 44557 : 44567),
+        port: envInt('WEB_LISTENER_PORT', isTcMode ? 44567 : 44557),
         path: env('WEB_LISTENER_PATH', '/notify'),
         sharedSecret: env('WEBHOOK_SHARED_SECRET')
     },
