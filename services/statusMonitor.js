@@ -565,6 +565,7 @@ async function runStatusUpdate() {
         totalPlayers = toInt(probe.summary.totalPlayers, 0);
         deletedPlayers = toInt(probe.summary.deletedPlayers, 0);
         lastSuccessAt = now;
+        probeError = '';
 
         if (status === 'up') {
             if (probe.summary.explicitServerStartTime > 0) {

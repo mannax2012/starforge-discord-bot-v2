@@ -33,6 +33,7 @@ const welcomeEnabled = envBool('DISCORD_WELCOME_ENABLED', isLiveMode);
 const botLogEnabled = envBool('DISCORD_BOT_LOG_ENABLED', isLiveMode);
 const webApiEnabled = envBool('WEB_LISTENER_ENABLED', true);
 const statusEnabled = envBool('STATUS_MONITOR_ENABLED', true);
+const swgChatEnabled = envBool('SWG_CHAT_ENABLED', false);
 
 module.exports = {
     mode: isTcMode ? 'tc' : 'live',
@@ -46,7 +47,8 @@ module.exports = {
         welcomeEnabled,
         botLogEnabled,
         webApiEnabled,
-        statusEnabled
+        statusEnabled,
+        swgChatEnabled
     },
 
     token: env('DISCORD_TOKEN'),
@@ -60,7 +62,7 @@ module.exports = {
     accountReviewChannelId: env('ACCOUNT_REVIEW_CHANNEL_ID'),
     botLogChannelId: env('BOT_LOG_CHANNEL_ID'),
     patchNotesChannelId: env('PATCH_NOTES_CHANNEL_ID'),
-    downloadUrl: env('DOWNLOAD_URL', 'https://swg-starforge.com/launcher/StarforgeInstaller.exe'),
+    downloadUrl: env('DOWNLOAD_URL', 'https://download.swg-starforge.com/StarforgeInstaller.exe?v=1'),
 
     webListener: {
         enabled: webApiEnabled,
@@ -115,6 +117,39 @@ module.exports = {
                 ? './data/server_status_state_tc.json'
                 : './data/server_status_state.json'
         )
+    },
+
+    swgChatBridge: {
+        enabled: swgChatEnabled,
+        serverName: env('SWG_CHAT_SERVER_NAME', isTcMode ? 'Starforge Test Center' : 'Starforge'),
+        discordToken: env('SWG_CHAT_DISCORD_TOKEN', env('HOLO_NET_DISCORD_TOKEN')),
+        loginAddress: env(
+            'SWG_CHAT_LOGIN_ADDRESS',
+            isTcMode
+                ? env('LAUNCHER_TC_LOGIN_SERVER_ADDRESS', 'testcenter.swg-starforge.com')
+                : env('LAUNCHER_LOGIN_SERVER_ADDRESS', 'login.swg-starforge.com')
+        ),
+        loginPort: envInt(
+            'SWG_CHAT_LOGIN_PORT',
+            isTcMode
+                ? envInt('LAUNCHER_TC_LOGIN_SERVER_PORT', 44453)
+                : envInt('LAUNCHER_LOGIN_SERVER_PORT', 44553)
+        ),
+        username: env('SWG_CHAT_USERNAME'),
+        password: env('SWG_CHAT_PASSWORD'),
+        character: env('SWG_CHAT_CHARACTER'),
+        chatRoom: env('SWG_CHAT_ROOM'),
+        chatChannelId: env('SWG_CHAT_CHANNEL_ID'),
+        chatChannelName: env('SWG_CHAT_CHANNEL_NAME'),
+        notificationChannelId: env('SWG_CHAT_NOTIFICATION_CHANNEL_ID'),
+        notificationChannelName: env('SWG_CHAT_NOTIFICATION_CHANNEL_NAME'),
+        notificationRoleId: env('SWG_CHAT_NOTIFICATION_ROLE_ID'),
+        notificationUserId: env('SWG_CHAT_NOTIFICATION_USER_ID'),
+        autoReplyToUnknownTells: env('SWG_CHAT_TELL_AUTO_REPLY', "[Chat Bot] This message is automated: Please contact server administration for any questions or issues."),
+        connectionTimeoutMs: envInt('SWG_CHAT_CONNECTION_TIMEOUT_MS', 10000),
+        failureThreshold: envInt('SWG_CHAT_FAILURE_THRESHOLD', 3),
+        verboseSwgLogging: envBool('SWG_CHAT_VERBOSE_SWG_LOGGING', false),
+        verboseDiscordLogging: envBool('SWG_CHAT_VERBOSE_DISCORD_LOGGING', false)
     },
 
     db: {

@@ -1,4 +1,5 @@
 const config = require('../config');
+const { handleDiscordMessage } = require('../services/swgChatBridge');
 
 module.exports = {
     name: 'messageCreate',
@@ -8,6 +9,7 @@ module.exports = {
         }
 
         if (!message.content.startsWith(config.prefix)) {
+            await handleDiscordMessage(message, client);
             return;
         }
 

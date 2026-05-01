@@ -1,5 +1,6 @@
 const config = require('../config');
 const { startStatusMonitor } = require('../services/statusMonitor');
+const { startSwgChatBridge } = require('../services/swgChatBridge');
 const { startWebApi } = require('../web-api');
 
 module.exports = {
@@ -14,6 +15,10 @@ module.exports = {
 
         if (config.features.webApiEnabled) {
             startWebApi(client);
+        }
+
+        if (config.features.swgChatEnabled) {
+            await startSwgChatBridge(client);
         }
     }
 };
