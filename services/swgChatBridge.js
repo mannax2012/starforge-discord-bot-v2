@@ -288,10 +288,12 @@ function attachSwgCallbacks() {
     };
     swgChatClient.reconnected = function () {
         const state = swgChatClient.getState();
-        upsertStatusNotification('up', `Connected as ${state.character || settings.character} in room ${state.chatRoom || settings.chatRoom}.`);
+        const connectionDetail = `Connected as ${state.character || settings.character} in room ${state.chatRoom || settings.chatRoom}.`;
+        console.log(`[SWG Chat] ${connectionDetail}`);
+        upsertStatusNotification('up');
         logToBotChannel(
             statusDiscordClient,
-            `SWG chat bridge connected as ${state.character || settings.character} in room ${state.chatRoom || settings.chatRoom} via ${getChatClientLabel()}.`
+            `SWG chat bridge ${connectionDetail} via ${getChatClientLabel()}.`
         );
     };
     swgChatClient.recvTell = function (from, message) {

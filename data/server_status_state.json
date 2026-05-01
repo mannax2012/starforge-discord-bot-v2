@@ -1,8 +1,0 @@
-{
-  "previousStatus": "down",
-  "serverStartTime": 0,
-  "maxConnectedUsers": 0,
-  "lastSuccessAt": 0,
-  "lastGoodSnapshot": null,
-  "consecutiveFailures": 4
-}
