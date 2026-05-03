@@ -121,7 +121,12 @@ function normalizePatchLines(lines) {
     const seen = new Set();
 
     for (const value of lines) {
-        const line = String(value || '').trim();
+        const line = String(value || '')
+            .replace(/\r/g, '')
+            .replace(/^\d+\.\s+/, '')
+            .replace(/^[^A-Za-z0-9\[]+\s*/, '')
+            .replace(/\s+/g, ' ')
+            .trim();
         if (!line) {
             continue;
         }
@@ -142,10 +147,10 @@ function buildPatchNotesAnnouncementContent(payload) {
     const version = String(payload.version || '').trim();
     const date = String(payload.date || '').trim();
     const titleOverride = String(payload.title || '').trim();
-    const intro = String(payload.intro || '').trim();
     const patchNotesUrl = String(payload.patchNotesUrl || '').trim();
     const postedBy = String(payload.postedBy || '').trim();
     const changes = normalizePatchLines(payload.changes);
+    const displayHeadline = titleOverride || (version ? `Update ${version} now live!` : 'Update now live!');
 
     const headline = titleOverride || (version ? `✨ **Starforge Patch Notes — ${version}**` : '✨ **Starforge Patch Notes**');
     const footerBits = [];
@@ -159,16 +164,11 @@ function buildPatchNotesAnnouncementContent(payload) {
     }
 
     const lines = [];
-    lines.push(headline);
-
-    if (intro) {
-        lines.push('');
-        lines.push(intro);
-    }
+    lines.push(displayHeadline);
 
     if (changes.length > 0) {
         lines.push('');
-        lines.push('**Changes**');
+        lines.push('Changes');
     }
 
     const maxLength = 1900;
