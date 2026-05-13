@@ -27,6 +27,7 @@ const {
     setCachedGameSession,
     clearCachedGameSessions
 } = require('./services/launcherGameSessionCache');
+const { formatAttemptedEndpoints, postTcApiJson } = require('./utils/tcApiFetch');
 
 function requireSharedSecret(req, res, next) {
     const provided = String(req.get('X-Starforge-Key') || '').trim();
@@ -537,40 +538,24 @@ async function queryTcAccountStatus(username) {
         };
     }
 
-    const headers = {
-        'Content-Type': 'application/json'
-    };
+    const requestResult = await postTcApiJson(
+        endpoint,
+        sharedSecret,
+        { username: String(username || '').trim() },
+        'AccountSyncStatus'
+    );
 
-    if (sharedSecret) {
-        headers['X-Starforge-Key'] = sharedSecret;
-    }
-
-    let response;
-    let json;
-
-    try {
-        response = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ username: String(username || '').trim() })
-        });
-    } catch (error) {
+    if (!requestResult.ok) {
         return {
             success: false,
-            message: `Failed to reach TC status API: ${error.message}`,
+            message: requestResult.errorType === 'network'
+                ? `Failed to reach TC status API: ${requestResult.error.message}${formatAttemptedEndpoints(requestResult.attemptedEndpoints)}`
+                : 'TC status API returned unreadable JSON.',
             data: null
         };
     }
 
-    try {
-        json = await response.json();
-    } catch (error) {
-        return {
-            success: false,
-            message: 'TC status API returned unreadable JSON.',
-            data: null
-        };
-    }
+    const json = requestResult.json;
 
     return {
         success: !!json.success,
@@ -601,43 +586,28 @@ async function syncLiveAccountToTc(username, options) {
         };
     }
 
-    const headers = {
-        'Content-Type': 'application/json'
-    };
+    const requestResult = await postTcApiJson(
+        endpoint,
+        sharedSecret,
+        {
+            ...liveAccount,
+            overwriteTc
+        },
+        'SyncLiveAccountToTc'
+    );
 
-    if (sharedSecret) {
-        headers['X-Starforge-Key'] = sharedSecret;
-    }
-
-    let response;
-    let json;
-
-    try {
-        response = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                ...liveAccount,
-                overwriteTc
-            })
-        });
-    } catch (error) {
+    if (!requestResult.ok) {
         return {
             success: false,
             statusCode: 502,
-            message: `Failed to reach TC import API: ${error.message}`
+            message: requestResult.errorType === 'network'
+                ? `Failed to reach TC import API: ${requestResult.error.message}${formatAttemptedEndpoints(requestResult.attemptedEndpoints)}`
+                : 'TC import API returned unreadable JSON.'
         };
     }
 
-    try {
-        json = await response.json();
-    } catch (error) {
-        return {
-            success: false,
-            statusCode: 502,
-            message: 'TC import API returned unreadable JSON.'
-        };
-    }
+    const response = requestResult.response;
+    const json = requestResult.json;
 
     return {
         success: !!json.success,

@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const pool = require('./database');
 const config = require('../config');
 const { logToBotChannel } = require('./logging');
+const { formatAttemptedEndpoints, postTcApiJson } = require('../utils/tcApiFetch');
 
 function makeSalt(stationId) {
     const saltFull = crypto.createHash('sha256').update(String(stationId)).digest('hex');
@@ -68,51 +69,40 @@ async function mirrorAccountToTc(username, password, email) {
         };
     }
 
-    const headers = {
-        'Content-Type': 'application/json'
-    };
+    console.log('[RegisterMirror] POST', endpoint);
 
-    if (sharedSecret) {
-        headers['X-Starforge-Key'] = sharedSecret;
-    }
+    const requestResult = await postTcApiJson(
+        endpoint,
+        sharedSecret,
+        {
+            username: String(username || '').trim(),
+            password: String(password || ''),
+            email: String(email || '').trim()
+        },
+        'RegisterMirror'
+    );
 
-    let response;
-    let json;
+    if (!requestResult.ok) {
+        if (requestResult.errorType === 'network') {
+            console.error('[RegisterMirror] FETCH FAILED', requestResult.error);
+        } else {
+            console.error('[RegisterMirror] JSON parse failed', requestResult.error);
+        }
 
-    try {
-        console.log('[RegisterMirror] POST', endpoint);
-
-        response = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                username: String(username || '').trim(),
-                password: String(password || ''),
-                email: String(email || '').trim()
-            })
-        });
-
-        console.log('[RegisterMirror] Response status:', response.status);
-    } catch (error) {
-        console.error('[RegisterMirror] FETCH FAILED', error);
         return {
             attempted: true,
             success: false,
-            message: `Failed to reach TC mirror registration API: ${error.message}`
+            message: requestResult.errorType === 'network'
+                ? `Failed to reach TC mirror registration API: ${requestResult.error.message}${formatAttemptedEndpoints(requestResult.attemptedEndpoints)}`
+                : 'TC mirror registration API returned unreadable JSON.'
         };
     }
 
-    try {
-        json = await response.json();
-        console.log('[RegisterMirror] Response JSON:', json);
-    } catch (error) {
-        console.error('[RegisterMirror] JSON parse failed', error);
-        return {
-            attempted: true,
-            success: false,
-            message: 'TC mirror registration API returned unreadable JSON.'
-        };
-    }
+    const response = requestResult.response;
+    const json = requestResult.json;
+
+    console.log('[RegisterMirror] Response status:', response.status);
+    console.log('[RegisterMirror] Response JSON:', json);
 
     if (!response.ok || !json || !json.success) {
         console.log('[RegisterMirror] FAILED', {

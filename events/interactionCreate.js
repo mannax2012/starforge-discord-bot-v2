@@ -13,6 +13,22 @@ function hasActivationPermission(member) {
     return member.roles.cache.some(role => role.name === adminRoleName);
 }
 
+function formatActivationEmailStatus(data) {
+    if (!data) {
+        return 'Email notification status was not returned.';
+    }
+
+    if (data.activationEmailSent) {
+        return 'Activation email sent to the address on file.';
+    }
+
+    if (data.activationEmailAttempted) {
+        return `Activation email failed: ${data.activationEmailMessage || 'Unknown email delivery error.'}`;
+    }
+
+    return data.activationEmailMessage || 'Activation email was skipped.';
+}
+
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
@@ -35,7 +51,10 @@ module.exports = {
         }
 
         try {
-            const result = await activateAccountByUsername(username);
+            const result = await activateAccountByUsername(username, {
+                activatedBy: interaction.user.tag,
+                activationSource: 'discord_review_button'
+            });
 
             if (!result.success) {
                 await interaction.reply({
@@ -47,15 +66,17 @@ module.exports = {
                 return;
             }
 
+            const emailStatus = formatActivationEmailStatus(result.data);
+
             await interaction.update({
-                content: `✅ Account \`${username}\` activated by **${interaction.user.tag}**`,
+                content: `Account \`${username}\` activated by **${interaction.user.tag}**.\n${emailStatus}`,
                 embeds: [],
                 components: []
             });
 
             await logToBotChannel(
                 client,
-                `✅ ${interaction.user.tag} activated account \`${username}\` from a Discord review button.`
+                `${interaction.user.tag} activated account \`${username}\` from a Discord review button. ${emailStatus}`
             );
         } catch (error) {
             console.error('Activation button handler failed:', error);
@@ -67,7 +88,7 @@ module.exports = {
 
             await logToBotChannel(
                 client,
-                `❌ Activation button failed for \`${username}\`: ${error.message}`
+                `Activation button failed for \`${username}\`: ${error.message}`
             );
         }
     }

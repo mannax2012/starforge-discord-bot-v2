@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const pool = require('./database');
 const config = require('../config');
+const { formatAttemptedEndpoints, postTcApiJson } = require('../utils/tcApiFetch');
+const { sendActivationSuccessEmailNotification } = require('./activationEmailService');
 
 function makePasswordHash(password, salt) {
     return crypto
@@ -68,49 +70,38 @@ async function mirrorActivationToTc(username) {
         };
     }
 
-    const headers = {
-        'Content-Type': 'application/json'
-    };
+    console.log('[ActivateMirror] POST', endpoint);
 
-    if (sharedSecret) {
-        headers['X-Starforge-Key'] = sharedSecret;
-    }
+    const requestResult = await postTcApiJson(
+        endpoint,
+        sharedSecret,
+        {
+            username: String(username || '').trim()
+        },
+        'ActivateMirror'
+    );
 
-    let response;
-    let json;
+    if (!requestResult.ok) {
+        if (requestResult.errorType === 'network') {
+            console.error('[ActivateMirror] FETCH FAILED', requestResult.error);
+        } else {
+            console.error('[ActivateMirror] JSON parse failed', requestResult.error);
+        }
 
-    try {
-        console.log('[ActivateMirror] POST', endpoint);
-
-        response = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                username: String(username || '').trim()
-            })
-        });
-
-        console.log('[ActivateMirror] Response status:', response.status);
-    } catch (error) {
-        console.error('[ActivateMirror] FETCH FAILED', error);
         return {
             attempted: true,
             success: false,
-            message: `Failed to reach TC activation mirror API: ${error.message}`
+            message: requestResult.errorType === 'network'
+                ? `Failed to reach TC activation mirror API: ${requestResult.error.message}${formatAttemptedEndpoints(requestResult.attemptedEndpoints)}`
+                : 'TC activation mirror API returned unreadable JSON.'
         };
     }
 
-    try {
-        json = await response.json();
-        console.log('[ActivateMirror] Response JSON:', json);
-    } catch (error) {
-        console.error('[ActivateMirror] JSON parse failed', error);
-        return {
-            attempted: true,
-            success: false,
-            message: 'TC activation mirror API returned unreadable JSON.'
-        };
-    }
+    const response = requestResult.response;
+    const json = requestResult.json;
+
+    console.log('[ActivateMirror] Response status:', response.status);
+    console.log('[ActivateMirror] Response JSON:', json);
 
     if (!response.ok || !json || !json.success) {
         return {
@@ -178,6 +169,24 @@ async function getAccountProfile(username) {
             email
         }
     };
+}
+
+async function getAccountEmail(username) {
+    const normalizedUsername = String(username || '').trim();
+
+    if (!normalizedUsername) {
+        return '';
+    }
+
+    const [registerRows] = await pool.execute(
+        `SELECT email
+         FROM register
+         WHERE username = ?
+         LIMIT 1`,
+        [normalizedUsername]
+    );
+
+    return registerRows.length ? String(registerRows[0].email || '').trim() : '';
 }
 
 async function changeEmail(username, email) {
@@ -382,6 +391,8 @@ async function activateAccountByUsername(username, options) {
     const opts = options || {};
     const normalizedUsername = String(username || '').trim();
     const skipTcMirror = Boolean(opts.skipTcMirror);
+    const activatedBy = String(opts.activatedBy || '').trim();
+    const activationSource = String(opts.activationSource || '').trim();
 
     console.log('[Activate] Starting activation', {
         username: normalizedUsername,
@@ -432,6 +443,9 @@ async function activateAccountByUsername(username, options) {
 
     let tcMirrorActivated = false;
     let tcMirrorMessage = 'TC activation mirroring skipped.';
+    let activationEmailAttempted = false;
+    let activationEmailSent = false;
+    let activationEmailMessage = 'Activation email notification skipped.';
 
     if (!isTcMode() && !skipTcMirror) {
         const mirrorResult = await mirrorActivationToTc(normalizedUsername);
@@ -452,6 +466,29 @@ async function activateAccountByUsername(username, options) {
         });
     }
 
+    if (!isTcMode()) {
+        const email = await getAccountEmail(normalizedUsername);
+        const emailResult = await sendActivationSuccessEmailNotification({
+            username: normalizedUsername,
+            email,
+            activatedBy,
+            source: activationSource
+        });
+
+        activationEmailAttempted = emailResult.attempted === true;
+        activationEmailSent = emailResult.success === true;
+        activationEmailMessage = emailResult.message || activationEmailMessage;
+
+        console.log('[Activate] Activation email result', {
+            username: normalizedUsername,
+            attempted: activationEmailAttempted,
+            success: activationEmailSent,
+            message: activationEmailMessage
+        });
+    } else {
+        activationEmailMessage = 'Activation email notification is disabled in TC mode.';
+    }
+
     return {
         success: true,
         statusCode: 200,
@@ -460,7 +497,10 @@ async function activateAccountByUsername(username, options) {
             username: normalizedUsername,
             active: 1,
             tcMirrorActivated,
-            tcMirrorMessage
+            tcMirrorMessage,
+            activationEmailAttempted,
+            activationEmailSent,
+            activationEmailMessage
         }
     };
 }

@@ -84,17 +84,24 @@ module.exports = {
         launcherGameFeatures: envInt('LAUNCHER_GAME_FEATURES', 65535),
         launcherAllowMultipleInstances: envBool('LAUNCHER_ALLOW_MULTIPLE_INSTANCES', true),
 
-        launcherTcSessionApiUrl: env('LAUNCHER_TC_SESSION_API_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/tc-game-session'),
+        launcherTcSessionApiUrl: env('LAUNCHER_TC_SESSION_API_URL', 'http://testcenter.swg-starforge.com:44567/api/internal/tc-game-session'),
         launcherTcSessionApiKey: env('LAUNCHER_TC_SESSION_API_KEY', '')
     },
 
     registrationMirror: {
         enabled: envBool('TC_MIRROR_ENABLED', true),
-        tcRegisterUrl: env('TC_REGISTER_MIRROR_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/register-mirror'),
-        tcActivateUrl: env('TC_ACTIVATE_MIRROR_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/activate-mirror'),
-        tcStatusUrl: env('TC_ACCOUNT_STATUS_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/account-status'),
-        tcImportUrl: env('TC_ACCOUNT_IMPORT_URL', 'http://testcenter.swg-starforge.com:44557/api/internal/import-account'),
+        tcRegisterUrl: env('TC_REGISTER_MIRROR_URL', 'http://testcenter.swg-starforge.com:44567/api/internal/register-mirror'),
+        tcActivateUrl: env('TC_ACTIVATE_MIRROR_URL', 'http://testcenter.swg-starforge.com:44567/api/internal/activate-mirror'),
+        tcStatusUrl: env('TC_ACCOUNT_STATUS_URL', 'http://testcenter.swg-starforge.com:44567/api/internal/account-status'),
+        tcImportUrl: env('TC_ACCOUNT_IMPORT_URL', 'http://testcenter.swg-starforge.com:44567/api/internal/import-account'),
         tcSharedSecret: env('TC_SHARED_SECRET', env('LAUNCHER_TC_SESSION_API_KEY', ''))
+    },
+
+    accountNotifications: {
+        activationEmailEnabled: envBool('ACTIVATION_EMAIL_ENABLED', isLiveMode),
+        activationEmailUrl: env('ACTIVATION_EMAIL_URL', ''),
+        activationEmailSharedSecret: env('ACTIVATION_EMAIL_SHARED_SECRET', env('WEBHOOK_SHARED_SECRET', '')),
+        activationEmailTimeoutMs: envInt('ACTIVATION_EMAIL_TIMEOUT_MS', 10000)
     },
 
     serverStatus: {
