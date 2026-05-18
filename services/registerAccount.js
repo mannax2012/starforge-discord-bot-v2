@@ -44,12 +44,7 @@ async function mirrorAccountToTc(username, password, email) {
     const sharedSecret = String(mirrorConfig.tcSharedSecret || '').trim();
     const enabled = mirrorConfig.enabled !== false;
 
-    console.log('[RegisterMirror] Starting TC mirror', {
-        username,
-        endpoint,
-        enabled,
-        hasSharedSecret: !!sharedSecret
-    });
+    console.log(`[RegisterMirror] Starting [username=${username}] [enabled=${enabled}] [endpoint=${endpoint || 'missing'}]`);
 
     if (!enabled) {
         console.log('[RegisterMirror] Skipped: mirroring disabled');
@@ -61,15 +56,13 @@ async function mirrorAccountToTc(username, password, email) {
     }
 
     if (!endpoint) {
-        console.log('[RegisterMirror] FAILED: tcRegisterUrl missing');
+        console.warn('[RegisterMirror] Skipped: tcRegisterUrl missing');
         return {
             attempted: true,
             success: false,
             message: 'TC mirror URL is not configured.'
         };
     }
-
-    console.log('[RegisterMirror] POST', endpoint);
 
     const requestResult = await postTcApiJson(
         endpoint,
@@ -84,9 +77,9 @@ async function mirrorAccountToTc(username, password, email) {
 
     if (!requestResult.ok) {
         if (requestResult.errorType === 'network') {
-            console.error('[RegisterMirror] FETCH FAILED', requestResult.error);
+            console.error(`[RegisterMirror] Request failed: ${requestResult.error.message}`);
         } else {
-            console.error('[RegisterMirror] JSON parse failed', requestResult.error);
+            console.error(`[RegisterMirror] JSON parse failed: ${requestResult.error.message}`);
         }
 
         return {
@@ -101,14 +94,8 @@ async function mirrorAccountToTc(username, password, email) {
     const response = requestResult.response;
     const json = requestResult.json;
 
-    console.log('[RegisterMirror] Response status:', response.status);
-    console.log('[RegisterMirror] Response JSON:', json);
-
     if (!response.ok || !json || !json.success) {
-        console.log('[RegisterMirror] FAILED', {
-            ok: response.ok,
-            message: (json && json.message) || 'Unknown mirror error'
-        });
+        console.warn(`[RegisterMirror] Failed [username=${username}] [status=${response.status || 0}] [message=${(json && json.message) || 'Unknown mirror error'}]`);
 
         return {
             attempted: true,
@@ -117,7 +104,7 @@ async function mirrorAccountToTc(username, password, email) {
         };
     }
 
-    console.log('[RegisterMirror] SUCCESS for', username);
+    console.log(`[RegisterMirror] Success [username=${username}]`);
 
     return {
         attempted: true,
@@ -133,36 +120,30 @@ async function registerUser(username, password, email, client, message, options)
     const suppressBotLog = Boolean(opts.suppressBotLog);
     const skipTcMirror = Boolean(opts.skipTcMirror);
 
-    console.log('[Register] Starting registration', {
-        username: normalizedUsername,
-        email: normalizedEmail,
-        isTcMode: isTcMode(),
-        suppressBotLog,
-        skipTcMirror
-    });
+    console.log(`[Register] Starting [username=${normalizedUsername}] [mode=${isTcMode() ? 'tc' : 'live'}] [skipTcMirror=${skipTcMirror}]`);
 
     if (!config.dbSecret) {
-        console.log('[Register] FAILED: DB_SECRET is missing');
+        console.warn('[Register] Failed: DB_SECRET is missing');
         return { success: false, statusCode: 500, message: 'DB_SECRET is not configured.' };
     }
 
     if (!normalizedUsername || !password || !normalizedEmail) {
-        console.log('[Register] FAILED: missing username/email/password');
+        console.warn('[Register] Failed: missing username, email, or password');
         return { success: false, statusCode: 400, message: 'Username, email, and password are required.' };
     }
 
     if (normalizedUsername.length < 3 || normalizedUsername.length > 30) {
-        console.log('[Register] FAILED: username length invalid');
+        console.warn(`[Register] Failed validation [username=${normalizedUsername}] [reason=username length]`);
         return { success: false, statusCode: 400, message: 'Username must be between 3 and 30 characters.' };
     }
 
     if (!isValidEmail(normalizedEmail) || normalizedEmail.length > 100) {
-        console.log('[Register] FAILED: invalid email');
+        console.warn(`[Register] Failed validation [username=${normalizedUsername}] [reason=invalid email]`);
         return { success: false, statusCode: 400, message: 'A valid email address is required.' };
     }
 
     if (String(password).length < 6 || String(password).length > 30) {
-        console.log('[Register] FAILED: password length invalid');
+        console.warn(`[Register] Failed validation [username=${normalizedUsername}] [reason=password length]`);
         return { success: false, statusCode: 400, message: 'Password must be between 6 and 30 characters.' };
     }
 
@@ -170,18 +151,14 @@ async function registerUser(username, password, email, client, message, options)
 
     try {
         await connection.beginTransaction();
-        console.log('[Register] DB transaction started for', normalizedUsername);
-
         const [existingUserRows] = await connection.execute(
             'SELECT COUNT(*) AS count FROM accounts WHERE username = ? LIMIT 1',
             [normalizedUsername]
         );
 
-        console.log('[Register] Existing username count:', existingUserRows[0].count);
-
         if (existingUserRows[0].count > 0) {
             await connection.rollback();
-            console.log('[Register] FAILED: username already exists');
+            console.log(`[Register] Duplicate username [username=${normalizedUsername}]`);
             return { success: false, statusCode: 409, message: 'Username already exists.' };
         }
 
@@ -190,11 +167,9 @@ async function registerUser(username, password, email, client, message, options)
             [normalizedEmail]
         );
 
-        console.log('[Register] Existing email count:', existingEmailRows[0].count);
-
         if (existingEmailRows[0].count > 0) {
             await connection.rollback();
-            console.log('[Register] FAILED: email already exists');
+            console.log(`[Register] Duplicate email [username=${normalizedUsername}]`);
             return { success: false, statusCode: 409, message: 'Email already exists.' };
         }
 
@@ -203,10 +178,7 @@ async function registerUser(username, password, email, client, message, options)
         const passwordHash = makePasswordHash(password, salt);
         const regHash = crypto.randomBytes(16).toString('hex');
 
-        console.log('[Register] Creating local account row', {
-            username: normalizedUsername,
-            stationId
-        });
+        console.log(`[Register] Creating local account [username=${normalizedUsername}] [stationId=${stationId}]`);
 
         await connection.execute(
             'INSERT INTO accounts (username, password, station_id, salt, active) VALUES (?, ?, ?, ?, ?)',
@@ -219,7 +191,7 @@ async function registerUser(username, password, email, client, message, options)
         );
 
         await connection.commit();
-        console.log('[Register] Local registration committed successfully for', normalizedUsername);
+        console.log(`[Register] Local registration committed [username=${normalizedUsername}]`);
 
         if (!suppressBotLog) {
             await logToBotChannel(
@@ -232,19 +204,12 @@ async function registerUser(username, password, email, client, message, options)
         let tcMirrorMessage = 'TC mirroring skipped.';
 
         if (!isTcMode() && !skipTcMirror) {
-            console.log('[Register] Attempting TC mirror for', normalizedUsername);
-
             const mirrorResult = await mirrorAccountToTc(normalizedUsername, password, normalizedEmail);
 
             tcMirrorCreated = mirrorResult.success;
             tcMirrorMessage = mirrorResult.message;
 
-            console.log('[Register] TC mirror result', {
-                username: normalizedUsername,
-                attempted: mirrorResult.attempted,
-                success: mirrorResult.success,
-                message: mirrorResult.message
-            });
+            console.log(`[Register] Mirror result [username=${normalizedUsername}] [success=${mirrorResult.success}] [attempted=${mirrorResult.attempted}] [message=${mirrorResult.message}]`);
 
             if (!mirrorResult.success && mirrorResult.attempted) {
                 await logToBotChannel(
@@ -253,11 +218,7 @@ async function registerUser(username, password, email, client, message, options)
                 );
             }
         } else {
-            console.log('[Register] TC mirror skipped', {
-                username: normalizedUsername,
-                isTcMode: isTcMode(),
-                skipTcMirror
-            });
+            console.log(`[Register] Mirror skipped [username=${normalizedUsername}] [mode=${isTcMode() ? 'tc' : 'live'}] [skipTcMirror=${skipTcMirror}]`);
         }
 
         return {
@@ -271,7 +232,7 @@ async function registerUser(username, password, email, client, message, options)
         };
     } catch (error) {
         await connection.rollback();
-        console.error('[Register] ERROR during registration for', normalizedUsername, error);
+        console.error(`[Register] Failed [username=${normalizedUsername}]: ${error.message}`);
 
         if (!suppressBotLog) {
             await logToBotChannel(
@@ -287,7 +248,6 @@ async function registerUser(username, password, email, client, message, options)
         };
     } finally {
         connection.release();
-        console.log('[Register] Connection released for', normalizedUsername);
     }
 }
 

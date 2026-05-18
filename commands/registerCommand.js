@@ -71,7 +71,7 @@ module.exports = {
                 `✅ Your account **${result.username}** has been registered. An admin will review and activate it soon.`
             );
         } catch (error) {
-            console.error('Register command failed:', error);
+            console.error(`[Discord Register] Flow failed for ${message.author.tag}: ${error.message}`);
             await logToBotChannel(client, `❌ Registration flow failed for ${message.author.tag}: ${error.message}`);
             await message.author.send('❌ Registration failed or timed out. Please try again later.');
         }

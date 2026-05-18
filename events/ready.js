@@ -7,7 +7,7 @@ module.exports = {
     name: 'clientReady',
     once: true,
     async execute(client) {
-        console.log(`Logged in as ${client.user.tag} [mode=${config.mode}]`);
+        console.log(`[Startup] Discord client ready [user=${client.user.tag}] [mode=${config.mode}]`);
 
         if (config.features.statusEnabled) {
             startStatusMonitor();

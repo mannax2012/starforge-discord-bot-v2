@@ -823,16 +823,19 @@ async function runStatusUpdate() {
 
 function startStatusMonitor() {
     if (!config.serverStatus.enabled) {
-        console.log('Server status monitor disabled.');
+        console.log('[Status Monitor] Disabled');
         return;
     }
 
     const resolvedOutputPath = path.resolve(config.serverStatus.outputPath);
     const resolvedStatePath = path.resolve(config.serverStatus.statePath);
 
-    console.log(`Status output path: ${resolvedOutputPath}`);
-    console.log(`Status state path: ${resolvedStatePath}`);
-    console.log(`Status probe target: ${config.serverStatus.host}:${config.serverStatus.port} | interval=${config.serverStatus.intervalMs}ms | timeout=${config.serverStatus.timeoutMs}ms | failureThreshold=${FAILURE_THRESHOLD} | keepAliveGraceMs=${KEEP_ALIVE_GRACE_MS}`);
+    console.log(
+        `[Status Monitor] Started [target=${config.serverStatus.host}:${config.serverStatus.port}]` +
+        ` [intervalMs=${config.serverStatus.intervalMs}] [timeoutMs=${config.serverStatus.timeoutMs}]` +
+        ` [failureThreshold=${FAILURE_THRESHOLD}] [keepAliveGraceMs=${KEEP_ALIVE_GRACE_MS}]` +
+        ` [output=${resolvedOutputPath}] [state=${resolvedStatePath}]`
+    );
 
     let running = false;
     let hasPrintedInitialStatus = false;
@@ -878,7 +881,7 @@ function startStatusMonitor() {
         }
 
         console.log(
-            `Status: ${currentStatus} | PlayersConnected: ${currentConnectedUsers}` +
+            `[Status Monitor] State=${currentStatus} | Players=${currentConnectedUsers}` +
             (extras.length ? ` | ${extras.join(' | ')}` : '')
         );
     }
@@ -894,7 +897,7 @@ function startStatusMonitor() {
             const result = await runStatusUpdate();
             maybePrintStatus(result.output);
         } catch (error) {
-            console.error('Status update failed:', error);
+            console.error(`[Status Monitor] Update failed: ${error.message}`);
         } finally {
             running = false;
         }

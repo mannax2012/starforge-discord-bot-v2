@@ -192,12 +192,6 @@ async function createGameSessionForUser(username, ipAddress, options) {
     const requestedChannel = normalizeChannel(options);
     const tcBot = isTcBotMode();
 
-    console.log('[Launcher Game Session] mode=%s requestedChannel=%s username=%s',
-        tcBot ? 'tc' : 'live',
-        requestedChannel,
-        normalizedUsername
-    );
-
     // TC bot should always create its own local TC session.
     if (tcBot) {
         return await createLocalGameSession(account, ipAddress, { channel: 'TestCenter' });

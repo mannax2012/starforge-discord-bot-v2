@@ -334,6 +334,22 @@ async function loadLocalAccountForSync(username) {
     };
 }
 
+function getErrorMessage(error) {
+    return error && error.message ? error.message : String(error || 'Unknown error');
+}
+
+function logApiResult(scope, result, extraParts) {
+    const parts = Array.isArray(extraParts) ? extraParts.filter(Boolean) : [];
+    parts.push(`success=${result && result.success === true}`);
+    parts.push(`status=${result && result.statusCode ? result.statusCode : (result && result.success ? 200 : 400)}`);
+
+    if (result && result.message) {
+        parts.push(`message=${result.message}`);
+    }
+
+    console.log(`[${scope}] ${parts.join(' | ')}`);
+}
+
 function buildModeAccountSummary(account) {
     if (!account) {
         return {
@@ -619,12 +635,12 @@ async function syncLiveAccountToTc(username, options) {
 
 function startWebApi(client) {
     if (apiStarted) {
-        console.log('Starforge Web API already started. Skipping duplicate start.');
+        console.log('[Web API] Startup skipped: already running');
         return;
     }
 
     if (!config.webListener || !config.webListener.enabled) {
-        console.log('Starforge Web API is disabled.');
+        console.log('[Web API] Startup skipped: disabled');
         return;
     }
 
@@ -689,7 +705,7 @@ function startWebApi(client) {
             }
         });
     } catch (error) {
-        console.error('[API Admin Account Sync Status] ERROR', error);
+        console.error(`[API Admin Account Sync Status] ${getErrorMessage(error)}`);
 
         return res.status(500).json({
             success: false,
@@ -712,24 +728,14 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
         const username = req.body ? req.body.username : '';
         const overwriteTc = Boolean(req.body && req.body.overwriteTc);
 
-        console.log('[API Admin Sync Account To TC] Request received', {
-            username,
-            overwriteTc,
-            mode: config.mode || 'live',
-            isTcMode: config.isTcMode === true
-        });
-
         const result = await syncLiveAccountToTc(username, {
             overwriteTc
         });
 
-        console.log('[API Admin Sync Account To TC] Result', {
-            username,
-            success: result.success,
-            statusCode: result.statusCode,
-            message: result.message,
-            data: result.data || null
-        });
+        logApiResult('API Admin Sync Account To TC', result, [
+            `username=${String(username || '').trim() || 'missing'}`,
+            `overwriteTc=${overwriteTc}`
+        ]);
 
         return res.status(result.statusCode || (result.success ? 200 : 400)).json({
             success: result.success,
@@ -737,7 +743,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
             data: result.data || null
         });
     } catch (error) {
-        console.error('[API Admin Sync Account To TC] ERROR', error);
+        console.error(`[API Admin Sync Account To TC] ${getErrorMessage(error)}`);
 
         return res.status(500).json({
             success: false,
@@ -752,7 +758,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
             const status = readCurrentStatus();
             return res.status(200).json(status);
         } catch (error) {
-            console.error('API status current error:', error);
+            console.error(`[API Status Current] ${getErrorMessage(error)}`);
             return res.status(500).json(buildStatusFallback());
         }
     });
@@ -770,7 +776,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 data: result.data || null
             });
         } catch (error) {
-            console.error('API login error:', error);
+            console.error(`[API Login] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -785,24 +791,11 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
             const username = req.body ? req.body.username : '';
             const password = req.body ? req.body.password : '';
             const email = req.body ? req.body.email : '';
-            console.log('[API Register] Request received', {
-                username,
-                email,
-                mode: config.mode || 'live',
-                isTcMode: config.isTcMode === true
-            });
-
             const result = await registerUser(username, password, email, client, null);
 
-            console.log('[API Register] registerUser result', {
-                success: result.success,
-                statusCode: result.statusCode,
-                username: result.username,
-                stationId: result.stationId,
-                tcMirrorCreated: result.tcMirrorCreated,
-                tcMirrorMessage: result.tcMirrorMessage,
-                message: result.message
-            });
+            logApiResult('API Register', result, [
+                `username=${String(username || '').trim() || 'missing'}`
+            ]);
 
             if (!result.success) {
                 return res.status(result.statusCode || 400).json({
@@ -821,7 +814,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
             });
 
             if (config.features && config.features.reviewPostsEnabled && !reviewResult.success) {
-                console.error('API register review post failed:', reviewResult.message);
+                console.error(`[API Register] Review post failed: ${reviewResult.message}`);
 
                 await logToBotChannel(
                     client,
@@ -853,12 +846,12 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 }
             });
         } catch (error) {
-            console.error('API register error:', error);
+            console.error(`[API Register] ${getErrorMessage(error)}`);
 
             try {
                 await logToBotChannel(client, `❌ API register error: ${error.message}`);
             } catch (logError) {
-                console.error('Failed to log register API error to bot channel:', logError);
+                console.error(`[API Register] Failed to write bot log: ${getErrorMessage(logError)}`);
             }
 
             return res.status(500).json({
@@ -872,23 +865,13 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
         try {
             const username = req.body ? req.body.username : '';
 
-            console.log('[API Internal Activate Mirror] Request received', {
-                username,
-                mode: config.mode || 'live',
-                isTcMode: config.isTcMode === true
-            });
-
             const result = await activateAccountByUsername(username, {
                 skipTcMirror: true
             });
 
-            console.log('[API Internal Activate Mirror] Result', {
-                username,
-                success: result.success,
-                statusCode: result.statusCode,
-                message: result.message,
-                data: result.data || null
-            });
+            logApiResult('API Internal Activate Mirror', result, [
+                `username=${String(username || '').trim() || 'missing'}`
+            ]);
 
             return res.status(result.statusCode || (result.success ? 200 : 400)).json({
                 success: result.success,
@@ -896,7 +879,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 data: result.data || null
             });
         } catch (error) {
-            console.error('[API Internal Activate Mirror] ERROR', error);
+            console.error(`[API Internal Activate Mirror] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -936,7 +919,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 }
             });
         } catch (error) {
-            console.error('Internal mirror register error:', error);
+            console.error(`[API Internal Register Mirror] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -978,7 +961,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 }
             });
         } catch (error) {
-            console.error('[API Internal Account Status] ERROR', error);
+            console.error(`[API Internal Account Status] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -998,7 +981,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 data: result.data || null
             });
         } catch (error) {
-            console.error('[API Internal Import Account] ERROR', error);
+            console.error(`[API Internal Import Account] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -1019,7 +1002,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 data: result.data || null
             });
         } catch (error) {
-            console.error('API account profile error:', error);
+            console.error(`[API Account Profile] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -1042,7 +1025,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 data: result.data || null
             });
         } catch (error) {
-            console.error('API change-email error:', error);
+            console.error(`[API Change Email] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -1066,7 +1049,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 data: result.data || null
             });
         } catch (error) {
-            console.error('API change-password error:', error);
+            console.error(`[API Change Password] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -1089,7 +1072,7 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
                 data: result.data || null
             });
         } catch (error) {
-            console.error('API admin reset-password error:', error);
+            console.error(`[API Admin Reset Password] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -1103,21 +1086,11 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
     try {
         const username = req.body ? req.body.username : '';
 
-        console.log('[API Activate] Request received', {
-            username,
-            mode: config.mode || 'live',
-            isTcMode: config.isTcMode === true
-        });
-
         const result = await activateAccountByUsername(username);
 
-        console.log('[API Activate] Local activation result', {
-            username,
-            success: result.success,
-            statusCode: result.statusCode,
-            message: result.message,
-            data: result.data || null
-        });
+        logApiResult('API Activate', result, [
+            `username=${String(username || '').trim() || 'missing'}`
+        ]);
 
         return res.status(result.statusCode || (result.success ? 200 : 400)).json({
             success: result.success,
@@ -1125,7 +1098,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
             data: result.data || null
         });
     } catch (error) {
-        console.error('[API Activate] ERROR', error);
+        console.error(`[API Activate] ${getErrorMessage(error)}`);
 
         return res.status(500).json({
             success: false,
@@ -1155,12 +1128,12 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                 data: result.data || null
             });
         } catch (error) {
-            console.error('API patch notes announcement error:', error);
+            console.error(`[API Patch Notes] ${getErrorMessage(error)}`);
 
             try {
                 await logToBotChannel(client, `❌ Patch notes announcement API error: ${error.message}`);
             } catch (logError) {
-                console.error('Failed to log patch notes API error to bot channel:', logError);
+                console.error(`[API Patch Notes] Failed to write bot log: ${getErrorMessage(logError)}`);
             }
 
             return res.status(500).json({
@@ -1176,7 +1149,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
             const status = readCurrentStatus();
             return res.status(200).json(status);
         } catch (error) {
-            console.error('Launcher status current error:', error);
+            console.error(`[Launcher Status Current] ${getErrorMessage(error)}`);
             return res.status(500).json(buildStatusFallback());
         }
     });
@@ -1225,7 +1198,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                 }
             });
         } catch (error) {
-            console.error('Launcher login error:', error);
+            console.error(`[Launcher Login] ${getErrorMessage(error)}`);
             return res.status(500).json({
                 success: false,
                 message: 'Internal launcher authentication error.',
@@ -1255,7 +1228,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                 data: result.data || null
             });
         } catch (error) {
-            console.error('Launcher me error:', error);
+            console.error(`[Launcher Me] ${getErrorMessage(error)}`);
             return res.status(500).json({
                 success: false,
                 message: 'Internal launcher profile error.',
@@ -1275,7 +1248,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                 data: result.data || null
             });
         } catch (error) {
-            console.error('Launcher change-email error:', error);
+            console.error(`[Launcher Change Email] ${getErrorMessage(error)}`);
             return res.status(500).json({
                 success: false,
                 message: 'Internal launcher email update error.',
@@ -1296,7 +1269,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                 data: result.data || null
             });
         } catch (error) {
-            console.error('Launcher change-password error:', error);
+            console.error(`[Launcher Change Password] ${getErrorMessage(error)}`);
             return res.status(500).json({
                 success: false,
                 message: 'Internal launcher password update error.',
@@ -1353,7 +1326,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                 }
             });
         } catch (error) {
-            console.error('Launcher register error:', error);
+            console.error(`[Launcher Register] ${getErrorMessage(error)}`);
             return res.status(500).json({
                 success: false,
                 message: 'Internal launcher registration error.',
@@ -1412,7 +1385,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                 }
             });
         } catch (error) {
-            console.error('Launcher activation request error:', error);
+            console.error(`[Launcher Activation Request] ${getErrorMessage(error)}`);
             return res.status(500).json({
                 success: false,
                 message: 'Internal launcher activation request error.',
@@ -1438,11 +1411,6 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                     ? 'TestCenter'
                     : 'Live';
 
-            console.log('[Launcher API] /api/launcher/game-session raw=%s normalized=%s user=%s',
-                channelRaw,
-                channel,
-                req.launcherSession.username
-            );
             const cached = getCachedGameSession(req.launcherAccessToken, channel);
             if (cached) {
                 return res.status(200).json({
@@ -1470,7 +1438,7 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
                 data: result.data || null
             });
         } catch (error) {
-            console.error('Launcher game-session error:', error);
+            console.error(`[Launcher Game Session] ${getErrorMessage(error)}`);
 
             return res.status(500).json({
                 success: false,
@@ -1484,12 +1452,12 @@ app.post('/api/admin/activate-account', requireSharedSecret, async function (req
     const port = config.webListener.port;
 
     app.listen(port, host, async function () {
-        console.log(`Starforge Web API listening on http://${host}:${port} [mode=${config.mode || 'live'}]`);
+        console.log(`[Web API] Listening on http://${host}:${port} [mode=${config.mode || 'live'}]`);
 
         try {
             await logToBotChannel(client, `🌐 Starforge Web API listening on ${host}:${port} [mode=${config.mode || 'live'}]`);
         } catch (error) {
-            console.error('Failed to log API startup to bot channel:', error);
+            console.error(`[Web API] Failed to write startup log: ${getErrorMessage(error)}`);
         }
     });
 }

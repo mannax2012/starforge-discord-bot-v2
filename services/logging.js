@@ -15,7 +15,7 @@ async function logToBotChannel(client, text) {
             await channel.send(text);
         }
     } catch (error) {
-        console.error('Failed to log to bot channel:', error.message);
+        console.error(`[Bot Log] Failed to write message: ${error.message}`);
     }
 }
 

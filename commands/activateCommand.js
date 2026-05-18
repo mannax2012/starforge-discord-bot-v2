@@ -45,22 +45,9 @@ module.exports = {
         }
 
         try {
-            console.log('[ActivateCommand] Request received', {
-                username,
-                requestedBy: message.author.tag
-            });
-
             const result = await activateAccountByUsername(username, {
                 activatedBy: message.author.tag,
                 activationSource: 'discord_command'
-            });
-
-            console.log('[ActivateCommand] Activation result', {
-                username,
-                success: result.success,
-                statusCode: result.statusCode,
-                message: result.message,
-                data: result.data || null
             });
 
             if (!result.success) {
@@ -107,7 +94,7 @@ module.exports = {
                 }
             }
         } catch (error) {
-            console.error('Activate command error:', error);
+            console.error(`[Discord Activate] ${username} failed: ${error.message}`);
             await logToBotChannel(client, `${message.author.tag} failed to activate \`${username}\`: ${error.message}`);
             await message.reply('There was an error activating that account.');
         }

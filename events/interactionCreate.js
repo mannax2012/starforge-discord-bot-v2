@@ -87,7 +87,7 @@ module.exports = {
                 `${interaction.user.tag} activated account \`${username}\` from a Discord review button. ${emailStatus}`
             );
         } catch (error) {
-            console.error('Activation button handler failed:', error);
+            console.error(`[Activation Button] ${username} failed: ${error.message}`);
 
             await interaction.reply({
                 content: `Activation failed for \`${username}\`.`,

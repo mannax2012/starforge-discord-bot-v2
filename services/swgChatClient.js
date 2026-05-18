@@ -16,7 +16,7 @@ module.exports.debug = function() {
     verboseSWGLogging = true;
     SOEProtocol.setVerboseLogging(true);
     SOEProtocol.debug();
-    console.log(getFullTimestamp() + " - Enabled verbose SWG logging");
+    console.log(getFullTimestamp() + " - [SWG Chat] Verbose logging enabled");
 }
 
 module.exports.isConnected = false;
@@ -44,7 +44,7 @@ module.exports.getState = function() {
 }
 module.exports.sendChat = function(message, user) {
     if (!module.exports.isConnected) return;
-    if (verboseSWGLogging) console.log(getFullTimestamp() + " - sending chat to game: " + user + ": " + message);
+    if (verboseSWGLogging) console.log(getFullTimestamp() + " - [SWG Chat] Sending room chat from " + user);
     send("ChatSendToRoom", {Message: ' \\#ff3333' + user + ': \\#ff66ff' + message, RoomID: server.ChatRoomID});
 }
 module.exports.recvChat = function(message, player) {}
@@ -53,8 +53,8 @@ module.exports.serverUp = function() {}
 module.exports.reconnected = function() {}
 module.exports.sendTell = function(player, message) {
     if (!module.exports.isConnected) return;
-    if (player != server.Character)
-    	console.log(getFullTimestamp() + " - sending tell to: " + player + ": " + message);
+    if (verboseSWGLogging && player != server.Character)
+    	console.log(getFullTimestamp() + " - [SWG Chat] Sending tell to " + player);
     send("ChatInstantMessageToCharacter", {ServerName: server.ServerName, PlayerName: player, Message: message});
 }
 module.exports.recvTell = function(from, message) {}
@@ -74,8 +74,7 @@ function handleMessage(msg, info) {
             packets = [packets];
         }
     } catch (ex) {
-        console.log(getFullTimestamp() + " - Exception with header: " + header.toString(16).toUpperCase().padStart(4, 0))
-        console.log(getFullTimestamp() + " - " + ex.toString());
+        console.error(getFullTimestamp() + " - [SWG Chat] Decode failed for header 0x" + header.toString(16).toUpperCase().padStart(4, 0) + ": " + ex.toString());
         Login();
         return;
     }
@@ -118,7 +117,7 @@ handlePacket["SessionResponse"] = function(packet) {
     }
 }
 handlePacket["LoginClientToken"] = function(packet) {
-    console.log(getFullTimestamp() + " - Logged into SWG login server");
+    console.log(getFullTimestamp() + " - [SWG Chat] Logged into login server");
     loggedIn = true;
 }
 handlePacket["LoginEnumCluster"] = function(packet) {
@@ -135,12 +134,12 @@ handlePacket["EnumerateCharacterId"] = function(packet) {
             if (packet.Characters[c].Name.startsWith(server.Character))
                 character = packet.Characters[c];
     if (!character) {
-        console.log(getFullTimestamp() + " - SWG chat character not found on the account: " + server.Character);
+        console.warn(getFullTimestamp() + " - [SWG Chat] Character not found on account: " + server.Character);
         return;
     }
     var serverData = server.Servers[character.ServerID];
     if (!serverData) {
-        console.log(getFullTimestamp() + " - SWG chat server data was missing for character: " + server.Character);
+        console.warn(getFullTimestamp() + " - [SWG Chat] Server data missing for character: " + server.Character);
         return;
     }
     server.Address = serverData.IPAddress;
@@ -172,7 +171,7 @@ handlePacket["ChatOnEnteredRoom"] = function(packet) {
     if (packet.RoomID == server.ChatRoomID && packet.PlayerName == server.Character) {
         if (!module.exports.isConnected) {
             module.exports.isConnected = true;
-            console.log(getFullTimestamp() + " - Character " + packet.PlayerName + " logged into SWG and entered chatroom ID# " + packet.RoomID);
+            console.log(getFullTimestamp() + " - [SWG Chat] Joined room " + packet.RoomID + " as " + packet.PlayerName);
             module.exports.reconnected();
         }
         const failureThreshold = Math.max(1, Number(server.failureThreshold || 3));
@@ -190,13 +189,13 @@ handlePacket["ChatInstantMessageToClient"] = function(packet) {
 }
 handlePacket["ChatOnLeaveRoom"] = function(packet) {
     if (packet.RoomID == server.ChatRoomID && packet.PlayerName == server.Character) {
-        console.log(getFullTimestamp() + " - Character " + packet.PlayerName + " has left chatroom ID# " + packet.RoomID + " with error code " + packet.Error);
+        console.log(getFullTimestamp() + " - [SWG Chat] Left room " + packet.RoomID + " as " + packet.PlayerName + " [error=" + packet.Error + "]");
     }
 }
 
 var disconnectCount = 0;
 handlePacket["Disconnect"] = function(packet) {
-    console.log(getFullTimestamp() + " - Received Disconnect packet from server.  Connection ID = " + packet.connectionID + ".  Reason code = " + packet.reasonID + ".  Disconnect count = " + disconnectCount++);
+    console.warn(getFullTimestamp() + " - [SWG Chat] Disconnect received [connectionId=" + packet.connectionID + "] [reason=" + packet.reasonID + "] [count=" + disconnectCount++ + "]");
 }
 
 //handlePacket["ServerNetStatusUpdate"] = function(packet) {} //This is network status packet from server, no response required
@@ -207,7 +206,7 @@ function Login() {
     safeCloseSocket();
 
     if (!server.LoginAddress || !server.LoginPort) {
-        console.log(getFullTimestamp() + " - SWG chat login settings are incomplete.");
+        console.warn(getFullTimestamp() + " - [SWG Chat] Login settings are incomplete.");
         return;
     }
 
@@ -218,7 +217,7 @@ function Login() {
     socket = dgram.createSocket('udp4');
     socket.on('message', handleMessage);
     socket.on('error', (error) => {
-        console.log(getFullTimestamp() + " - SWG socket error: " + error.message);
+        console.error(getFullTimestamp() + " - [SWG Chat] Socket error: " + error.message);
     });
 
     send("SessionRequest");

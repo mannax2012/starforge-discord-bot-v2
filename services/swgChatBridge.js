@@ -132,7 +132,7 @@ async function resolveTextChannel(client, channelId, channelName) {
         try {
             channel = await client.channels.fetch(channelId);
         } catch (error) {
-            console.error(`Failed to fetch Discord channel ${channelId}:`, error.message);
+            console.error(`[SWG Chat] Failed to fetch Discord channel ${channelId}: ${error.message}`);
         }
     }
 
@@ -176,7 +176,7 @@ async function startSecondaryChatDiscordClient() {
         try {
             await handleDiscordMessage(message, client);
         } catch (error) {
-            console.error('Secondary SWG chat client message handler failed:', error);
+            console.error(`[SWG Chat] Secondary Discord client handler failed: ${error.message}`);
         }
     });
 
@@ -234,7 +234,7 @@ async function upsertStatusNotification(status, detail) {
             updatedAt: new Date().toISOString()
         });
     } catch (error) {
-        console.error('Failed to upsert SWG chat status notification:', error);
+        console.error(`[SWG Chat] Failed to update status notification: ${error.message}`);
     }
 }
 
@@ -272,7 +272,7 @@ async function relayGameChatToDiscord(message, player) {
             allowedMentions: { parse: [] }
         });
     } catch (error) {
-        console.error('Failed to relay SWG chat message to Discord:', error);
+        console.error(`[SWG Chat] Failed to relay game chat to Discord: ${error.message}`);
     }
 }
 
@@ -289,7 +289,7 @@ function attachSwgCallbacks() {
     swgChatClient.reconnected = function () {
         const state = swgChatClient.getState();
         const connectionDetail = `Connected as ${state.character || settings.character} in room ${state.chatRoom || settings.chatRoom}.`;
-        console.log(`[SWG Chat] ${connectionDetail}`);
+        console.log(`[SWG Chat] Connected [character=${state.character || settings.character}] [room=${state.chatRoom || settings.chatRoom}]`);
         upsertStatusNotification('up');
         logToBotChannel(
             statusDiscordClient,
@@ -304,7 +304,9 @@ function attachSwgCallbacks() {
             return;
         }
 
-        console.log(`[SWG Chat] tell from ${from}: ${message}`);
+        if (verboseDiscordLoggingEnabled()) {
+            console.log(`[SWG Chat] Tell received [from=${from}]`);
+        }
 
         if (settings.autoReplyToUnknownTells) {
             swgChatClient.sendTell(from, settings.autoReplyToUnknownTells);
@@ -331,7 +333,7 @@ async function startSwgChatBridge(client) {
             const missing = getMissingSettings(settings);
 
             if (missing.length > 0) {
-                console.warn(`SWG chat bridge is enabled but missing settings: ${missing.join(', ')}`);
+                console.warn(`[SWG Chat] Missing settings: ${missing.join(', ')}`);
                 return false;
             }
 
@@ -350,7 +352,7 @@ async function startSwgChatBridge(client) {
             }
 
             if (!chatChannel) {
-                console.warn('SWG chat bridge could not find the configured Discord chat channel.');
+                console.warn('[SWG Chat] Configured Discord chat channel was not found.');
                 return false;
             }
 
@@ -387,12 +389,12 @@ async function startSwgChatBridge(client) {
 
             return true;
         } catch (error) {
-            console.error('SWG chat bridge startup failed:', error);
+            console.error(`[SWG Chat] Startup failed: ${error.message}`);
 
             try {
                 await logToBotChannel(client, `SWG chat bridge failed to start: ${error.message}`);
             } catch (logError) {
-                console.error('Failed to log SWG chat bridge startup error:', logError);
+                console.error(`[SWG Chat] Failed to write startup error to bot log: ${logError.message}`);
             }
 
             return false;

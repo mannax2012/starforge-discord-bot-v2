@@ -103,10 +103,7 @@ async function postTcApiJson(endpoint, sharedSecret, body, requestLabel) {
         }
 
         if (candidate !== candidates[0]) {
-            console.warn(`[${label}] Primary endpoint unreachable; fallback endpoint succeeded.`, {
-                primaryEndpoint: candidates[0],
-                endpointUsed: candidate
-            });
+            console.warn(`[${label}] Fallback endpoint succeeded [primary=${candidates[0]}] [used=${candidate}]`);
         }
 
         return {

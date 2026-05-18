@@ -13,7 +13,7 @@ async function dmUserPrompt(user, promptText, time = 60000) {
         const reply = collected.first();
         return reply ? reply.content.trim() : null;
     } catch (error) {
-        console.warn(`DM prompt failed or timed out: ${error.message}`);
+        console.warn(`[DM Prompt] Request failed or timed out: ${error.message}`);
         return null;
     }
 }

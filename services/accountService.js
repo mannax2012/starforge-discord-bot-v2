@@ -47,12 +47,7 @@ async function mirrorActivationToTc(username) {
     const sharedSecret = String(mirrorConfig.tcSharedSecret || '').trim();
     const enabled = mirrorConfig.enabled !== false;
 
-    console.log('[ActivateMirror] Starting TC activation mirror', {
-        username,
-        endpoint,
-        enabled,
-        hasSharedSecret: !!sharedSecret
-    });
+    console.log(`[ActivateMirror] Starting [username=${username}] [enabled=${enabled}] [endpoint=${endpoint || 'missing'}]`);
 
     if (!enabled) {
         return {
@@ -70,8 +65,6 @@ async function mirrorActivationToTc(username) {
         };
     }
 
-    console.log('[ActivateMirror] POST', endpoint);
-
     const requestResult = await postTcApiJson(
         endpoint,
         sharedSecret,
@@ -83,9 +76,9 @@ async function mirrorActivationToTc(username) {
 
     if (!requestResult.ok) {
         if (requestResult.errorType === 'network') {
-            console.error('[ActivateMirror] FETCH FAILED', requestResult.error);
+            console.error(`[ActivateMirror] Request failed: ${requestResult.error.message}`);
         } else {
-            console.error('[ActivateMirror] JSON parse failed', requestResult.error);
+            console.error(`[ActivateMirror] JSON parse failed: ${requestResult.error.message}`);
         }
 
         return {
@@ -100,10 +93,8 @@ async function mirrorActivationToTc(username) {
     const response = requestResult.response;
     const json = requestResult.json;
 
-    console.log('[ActivateMirror] Response status:', response.status);
-    console.log('[ActivateMirror] Response JSON:', json);
-
     if (!response.ok || !json || !json.success) {
+        console.warn(`[ActivateMirror] Failed [username=${username}] [status=${response.status || 0}] [message=${(json && json.message) || 'Unknown mirror error'}]`);
         return {
             attempted: true,
             success: false,
@@ -394,11 +385,7 @@ async function activateAccountByUsername(username, options) {
     const activatedBy = String(opts.activatedBy || '').trim();
     const activationSource = String(opts.activationSource || '').trim();
 
-    console.log('[Activate] Starting activation', {
-        username: normalizedUsername,
-        isTcMode: isTcMode(),
-        skipTcMirror
-    });
+    console.log(`[Activate] Starting [username=${normalizedUsername}] [mode=${isTcMode() ? 'tc' : 'live'}] [skipTcMirror=${skipTcMirror}]`);
 
     if (!normalizedUsername) {
         return {
@@ -414,7 +401,7 @@ async function activateAccountByUsername(username, options) {
     );
 
     if (!rows.length) {
-        console.log('[Activate] FAILED: account not found');
+        console.warn(`[Activate] Account not found [username=${normalizedUsername}]`);
         return {
             success: false,
             statusCode: 404,
@@ -425,7 +412,7 @@ async function activateAccountByUsername(username, options) {
     const account = rows[0];
 
     if (Number(account.active) === 1) {
-        console.log('[Activate] Account already active locally');
+        console.log(`[Activate] Already active [username=${normalizedUsername}]`);
         return {
             success: false,
             alreadyActive: true,
@@ -439,7 +426,7 @@ async function activateAccountByUsername(username, options) {
         [normalizedUsername]
     );
 
-    console.log('[Activate] Local activation complete for', normalizedUsername);
+    console.log(`[Activate] Local activation complete [username=${normalizedUsername}]`);
 
     let tcMirrorActivated = false;
     let tcMirrorMessage = 'TC activation mirroring skipped.';
@@ -453,18 +440,9 @@ async function activateAccountByUsername(username, options) {
         tcMirrorActivated = mirrorResult.success;
         tcMirrorMessage = mirrorResult.message;
 
-        console.log('[Activate] TC activation mirror result', {
-            username: normalizedUsername,
-            attempted: mirrorResult.attempted,
-            success: mirrorResult.success,
-            message: mirrorResult.message
-        });
+        console.log(`[Activate] Mirror result [username=${normalizedUsername}] [success=${mirrorResult.success}] [attempted=${mirrorResult.attempted}] [message=${mirrorResult.message}]`);
     } else {
-        console.log('[Activate] TC activation mirror skipped', {
-            username: normalizedUsername,
-            isTcMode: isTcMode(),
-            skipTcMirror
-        });
+        console.log(`[Activate] Mirror skipped [username=${normalizedUsername}] [mode=${isTcMode() ? 'tc' : 'live'}] [skipTcMirror=${skipTcMirror}]`);
     }
 
     if (!isTcMode()) {
@@ -481,13 +459,7 @@ async function activateAccountByUsername(username, options) {
         activationEmailSent = emailResult.success === true;
         activationEmailMessage = emailResult.message || activationEmailMessage;
 
-        console.log('[Activate] Activation email result', {
-            username: normalizedUsername,
-            email: activationEmailAddress,
-            attempted: activationEmailAttempted,
-            success: activationEmailSent,
-            message: activationEmailMessage
-        });
+        console.log(`[Activate] Email result [username=${normalizedUsername}] [attempted=${activationEmailAttempted}] [success=${activationEmailSent}] [message=${activationEmailMessage}]`);
     } else {
         activationEmailMessage = 'Activation email notification is disabled in TC mode.';
     }

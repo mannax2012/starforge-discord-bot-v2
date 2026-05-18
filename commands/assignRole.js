@@ -23,7 +23,7 @@ module.exports = {
             await message.reply(`✅ Assigned role **${role.name}** to ${targetMember.user.tag}.`);
             await logToBotChannel(client, `✅ ${message.author.tag} assigned \`${role.name}\` to \`${targetMember.user.tag}\`.`);
         } catch (error) {
-            console.error('assignrole failed:', error);
+            console.error(`[AssignRole] Failed for ${targetMember.user.tag}: ${error.message}`);
             await message.reply('❌ I could not assign that role. Check my permissions and role hierarchy.');
             await logToBotChannel(client, `❌ assignrole failed for ${message.author.tag}: ${error.message}`);
         }

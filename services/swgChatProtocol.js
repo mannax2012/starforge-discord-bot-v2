@@ -11,7 +11,7 @@ module.exports.setVerboseLogging = function (enabled) {
 
 module.exports.debug = function () {
     module.exports.setVerboseLogging(true);
-    console.log("Enabled verbose SOEProtocol logging");
+    console.log("[SWG Chat Protocol] Verbose logging enabled");
 }
 
 var fragments = null, fragmentLength;
@@ -28,7 +28,7 @@ var DecodeSOEPacket = module.exports.Decode = function(buf, decrypted) {
     }
 
     if (SOEHeader == 0x0001) { //This should never happen.  Will log in case it does.
-        console.log(getFullTimestamp() + " - Received SessionRequest packet from the server.  This is strange.");  
+        console.warn(getFullTimestamp() + " - [SWG Chat Protocol] Unexpected SessionRequest received from server.");  
         return [{type: "SessionRequest",
             CRCLength: buf.readUInt32BE(2),
             ConnectionID: buf.readUInt32BE(6).toString(16),

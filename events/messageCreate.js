@@ -24,7 +24,7 @@ module.exports = {
         try {
             await command.execute(message, args, client);
         } catch (error) {
-            console.error(`Command ${commandName} failed:`, error);
+            console.error(`[Command] ${commandName} failed: ${error.message}`);
             await message.reply('❌ There was an error executing that command.');
         }
     }

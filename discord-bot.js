@@ -13,7 +13,7 @@ function loadDiscordRuntime(client) {
         for (const file of fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'))) {
             const command = require(path.join(commandsPath, file));
             if (!command || !command.name || typeof command.execute !== 'function') {
-                console.warn(`Skipping invalid command module: ${file}`);
+                console.warn(`[Startup] Skipping invalid command module: ${file}`);
                 continue;
             }
             client.commands.set(command.name, command);
@@ -24,7 +24,7 @@ function loadDiscordRuntime(client) {
     for (const file of fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'))) {
         const event = require(path.join(eventsPath, file));
         if (!event || !event.name || typeof event.execute !== 'function') {
-            console.warn(`Skipping invalid event module: ${file}`);
+            console.warn(`[Startup] Skipping invalid event module: ${file}`);
             continue;
         }
 
@@ -37,7 +37,7 @@ function loadDiscordRuntime(client) {
 }
 
 async function startHeadlessMode() {
-    console.log(`Starting Starforge bot in headless ${config.mode.toUpperCase()} mode.`);
+    console.log(`[Startup] Starting headless mode [mode=${config.mode.toUpperCase()}]`);
 
     if (config.features.statusEnabled) {
         startStatusMonitor();
