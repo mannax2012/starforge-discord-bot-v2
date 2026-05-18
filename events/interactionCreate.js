@@ -18,12 +18,20 @@ function formatActivationEmailStatus(data) {
         return 'Email notification status was not returned.';
     }
 
+    const emailText = data.activationEmailAddress
+        ? ` \`${data.activationEmailAddress}\``
+        : '';
+
     if (data.activationEmailSent) {
-        return 'Activation email sent to the address on file.';
+        return `Activation email sent to${emailText || ' the address on file'}.`;
     }
 
     if (data.activationEmailAttempted) {
-        return `Activation email failed: ${data.activationEmailMessage || 'Unknown email delivery error.'}`;
+        return `Activation email failed${emailText ? ` for${emailText}` : ''}: ${data.activationEmailMessage || 'Unknown email delivery error.'}`;
+    }
+
+    if (emailText) {
+        return `${data.activationEmailMessage || 'Activation email was skipped.'} Email on file: ${emailText}.`;
     }
 
     return data.activationEmailMessage || 'Activation email was skipped.';

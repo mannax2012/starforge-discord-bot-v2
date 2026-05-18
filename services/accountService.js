@@ -446,6 +446,7 @@ async function activateAccountByUsername(username, options) {
     let activationEmailAttempted = false;
     let activationEmailSent = false;
     let activationEmailMessage = 'Activation email notification skipped.';
+    let activationEmailAddress = '';
 
     if (!isTcMode() && !skipTcMirror) {
         const mirrorResult = await mirrorActivationToTc(normalizedUsername);
@@ -468,6 +469,7 @@ async function activateAccountByUsername(username, options) {
 
     if (!isTcMode()) {
         const email = await getAccountEmail(normalizedUsername);
+        activationEmailAddress = email;
         const emailResult = await sendActivationSuccessEmailNotification({
             username: normalizedUsername,
             email,
@@ -481,6 +483,7 @@ async function activateAccountByUsername(username, options) {
 
         console.log('[Activate] Activation email result', {
             username: normalizedUsername,
+            email: activationEmailAddress,
             attempted: activationEmailAttempted,
             success: activationEmailSent,
             message: activationEmailMessage
@@ -500,7 +503,8 @@ async function activateAccountByUsername(username, options) {
             tcMirrorMessage,
             activationEmailAttempted,
             activationEmailSent,
-            activationEmailMessage
+            activationEmailMessage,
+            activationEmailAddress
         }
     };
 }

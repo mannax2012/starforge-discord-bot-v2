@@ -9,6 +9,12 @@ const DEFAULT_SERVER_NAME =
         : 'Starforge';
 const FAILURE_THRESHOLD = Math.max(1, Number(config.serverStatus && config.serverStatus.failureThreshold || 5));
 const KEEP_ALIVE_GRACE_MS = Math.max(0, Number(config.serverStatus && config.serverStatus.keepAliveGraceMs || 180000));
+const STATUS_STALE_AFTER_MS = Math.max(
+    config.serverStatus.intervalMs + config.serverStatus.timeoutMs,
+    Math.max(KEEP_ALIVE_GRACE_MS, config.serverStatus.intervalMs * FAILURE_THRESHOLD) +
+        config.serverStatus.intervalMs +
+        config.serverStatus.timeoutMs
+);
 const PROCESS_STARTED_AT_SECONDS = Math.floor(Date.now() / 1000);
 
 function ensureDirectoryForFile(filePath) {
@@ -260,6 +266,23 @@ function toLegacyStatus(status) {
     return normalized === 'up' || normalized === 'degraded' ? 'up' : 'down';
 }
 
+function buildSummary(status, serverName, connectedUsers, playerCap, peakPlayers, totalPlayers, deletedPlayers, serverStartTime, uptimeSeconds, timestampMs) {
+    return {
+        status,
+        serverName,
+        connectedUsers,
+        playerCap,
+        peakPlayers,
+        totalPlayers,
+        deletedPlayers,
+        explicitServerStartTime: serverStartTime,
+        explicitUptimeSeconds: uptimeSeconds,
+        timestampMs,
+        motd: '',
+        version: ''
+    };
+}
+
 function getZoneServerNode(parsedXml) {
     if (!parsedXml || !isPlainObject(parsedXml)) {
         return null;
@@ -368,20 +391,68 @@ function parseStatusXml(rawXml) {
     }
 }
 
-function shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapshot, lastSuccessAt, now) {
-    if (previousStatus !== 'up' || !lastGoodSnapshot) {
-        return false;
-    }
-
-    if (consecutiveFailures < FAILURE_THRESHOLD) {
-        return true;
-    }
-
+function isWithinKeepAliveGrace(lastSuccessAt, now) {
     if (lastSuccessAt <= 0 || KEEP_ALIVE_GRACE_MS <= 0) {
         return false;
     }
 
     return ((now - lastSuccessAt) * 1000) < KEEP_ALIVE_GRACE_MS;
+}
+
+function shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapshot) {
+    if (previousStatus !== 'up' || !lastGoodSnapshot) {
+        return false;
+    }
+
+    return consecutiveFailures < FAILURE_THRESHOLD;
+}
+
+function shouldReportDegraded(lastGoodSnapshot, lastSuccessAt, now) {
+    if (!lastGoodSnapshot) {
+        return false;
+    }
+
+    return isWithinKeepAliveGrace(lastSuccessAt, now);
+}
+
+function buildFallbackStatus(probeError) {
+    return {
+        schemaVersion: 3,
+        generatedAt: '',
+        source: {
+            type: 'tcp-xml',
+            host: config.serverStatus.host,
+            port: config.serverStatus.port,
+            timeoutMs: config.serverStatus.timeoutMs
+        },
+        serverName: DEFAULT_SERVER_NAME,
+        status: 'down',
+        healthState: 'down',
+        statusLabel: 'OFFLINE',
+        connectedUsers: 0,
+        playerCap: 0,
+        peakPlayers: 0,
+        maxConnectedUsers: 0,
+        serverStartTime: 0,
+        uptimeSeconds: 0,
+        lastChecked: 0,
+        lastSuccessAt: 0,
+        statusChangedAt: 0,
+        probeError,
+        transportWarning: '',
+        consecutiveFailures: 0,
+        users: {
+            connected: 0,
+            cap: 0,
+            peak: 0,
+            total: 0,
+            deleted: 0,
+            highWater: 0
+        },
+        summary: null,
+        xml: null,
+        rawXml: ''
+    };
 }
 
 function parseIfAnyData(raw, warningText) {
@@ -527,7 +598,8 @@ async function runStatusUpdate() {
         maxConnectedUsers: 0,
         lastSuccessAt: 0,
         lastGoodSnapshot: null,
-        consecutiveFailures: 0
+        consecutiveFailures: 0,
+        statusChangedAt: 0
     });
 
     const probe = await probeServerOnce();
@@ -538,6 +610,7 @@ async function runStatusUpdate() {
     let lastSuccessAt = toInt(state.lastSuccessAt, 0);
     let lastGoodSnapshot = state.lastGoodSnapshot || null;
     let consecutiveFailures = clampFailureCount(state.consecutiveFailures);
+    let statusChangedAt = toInt(state.statusChangedAt, 0);
 
     let status = 'unknown';
     let connectedUsers = 0;
@@ -597,7 +670,7 @@ async function runStatusUpdate() {
     } else {
         consecutiveFailures = clampFailureCount(consecutiveFailures + 1);
 
-        if (shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapshot, lastSuccessAt, now)) {
+        if (shouldHoldStatusUp(previousStatus, consecutiveFailures, lastGoodSnapshot)) {
             status = 'up';
             connectedUsers = toInt(lastGoodSnapshot.connectedUsers, 0);
             serverName = lastGoodSnapshot.serverName || DEFAULT_SERVER_NAME;
@@ -608,7 +681,7 @@ async function runStatusUpdate() {
             peakPlayers = toInt(lastGoodSnapshot.peakPlayers, 0);
             totalPlayers = toInt(lastGoodSnapshot.totalPlayers, 0);
             deletedPlayers = toInt(lastGoodSnapshot.deletedPlayers, 0);
-        } else {
+        } else if (shouldReportDegraded(lastGoodSnapshot, lastSuccessAt, now)) {
             status = 'degraded';
             serverName = lastGoodSnapshot && lastGoodSnapshot.serverName
                 ? lastGoodSnapshot.serverName
@@ -638,9 +711,40 @@ async function runStatusUpdate() {
             rawXml = lastGoodSnapshot ? (lastGoodSnapshot.rawXml || '') : '';
 
             if (serverStartTime <= 0) {
-                serverStartTime = PROCESS_STARTED_AT_SECONDS;
+                serverStartTime = lastSuccessAt > 0 ? lastSuccessAt : PROCESS_STARTED_AT_SECONDS;
             }
+        } else {
+            status = 'down';
+            serverName = lastGoodSnapshot && lastGoodSnapshot.serverName
+                ? lastGoodSnapshot.serverName
+                : DEFAULT_SERVER_NAME;
+            connectedUsers = 0;
+            playerCap = 0;
+            peakPlayers = 0;
+            totalPlayers = 0;
+            deletedPlayers = 0;
+            summary = buildSummary(
+                'down',
+                serverName,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                now * 1000
+            );
+            xml = null;
+            rawXml = '';
+            serverStartTime = 0;
         }
+    }
+
+    if (status !== previousStatus) {
+        statusChangedAt = now;
+    } else if (statusChangedAt <= 0) {
+        statusChangedAt = now;
     }
 
     const uptimeSeconds = (status === 'up' || status === 'degraded') && serverStartTime > 0
@@ -669,6 +773,7 @@ async function runStatusUpdate() {
         uptimeSeconds,
         lastChecked: now,
         lastSuccessAt,
+        statusChangedAt,
         probeError,
         transportWarning,
         consecutiveFailures,
@@ -705,7 +810,8 @@ async function runStatusUpdate() {
         maxConnectedUsers,
         lastSuccessAt,
         lastGoodSnapshot,
-        consecutiveFailures
+        consecutiveFailures,
+        statusChangedAt
     });
 
     return {
@@ -734,7 +840,11 @@ function startStatusMonitor() {
     let lastPrintedConnectedUsers = null;
 
     function maybePrintStatus(output) {
-        const currentStatus = String(output && output.status ? output.status : 'down');
+        const currentStatus = String(
+            output && (output.healthState || output.status)
+                ? (output.healthState || output.status)
+                : 'down'
+        );
         const currentConnectedUsers = Number(output && output.connectedUsers ? output.connectedUsers : 0);
 
         const shouldPrint =
@@ -796,39 +906,37 @@ function startStatusMonitor() {
 
 function readCurrentStatus() {
     const outputPath = path.resolve(config.serverStatus.outputPath);
+    const status = loadJson(outputPath, buildFallbackStatus('Status file missing'));
+    const now = Math.floor(Date.now() / 1000);
+    const lastChecked = toInt(status.lastChecked, 0);
 
-    return loadJson(outputPath, {
-        schemaVersion: 3,
-        generatedAt: '',
-        source: {
-            type: 'tcp-xml',
-            host: config.serverStatus.host,
-            port: config.serverStatus.port,
-            timeoutMs: config.serverStatus.timeoutMs
-        },
-        serverName: DEFAULT_SERVER_NAME,
+    if (lastChecked <= 0 || ((now - lastChecked) * 1000) <= STATUS_STALE_AFTER_MS) {
+        return status;
+    }
+
+    const serverName = String(status.serverName || DEFAULT_SERVER_NAME).trim() || DEFAULT_SERVER_NAME;
+    const staleAgeSeconds = Math.max(0, now - lastChecked);
+
+    return Object.assign({}, status, {
+        serverName,
         status: 'down',
+        healthState: 'down',
         statusLabel: 'OFFLINE',
         connectedUsers: 0,
         playerCap: 0,
         peakPlayers: 0,
-        maxConnectedUsers: 0,
         serverStartTime: 0,
         uptimeSeconds: 0,
-        lastChecked: 0,
-        lastSuccessAt: 0,
-        probeError: 'Status file missing',
+        probeError: `Status monitor data is stale (${staleAgeSeconds}s old).`,
         transportWarning: '',
-        consecutiveFailures: 0,
-        users: {
+        users: Object.assign({}, status.users || {}, {
             connected: 0,
             cap: 0,
             peak: 0,
             total: 0,
-            deleted: 0,
-            highWater: 0
-        },
-        summary: null,
+            deleted: 0
+        }),
+        summary: buildSummary('down', serverName, 0, 0, 0, 0, 0, 0, 0, now * 1000),
         xml: null,
         rawXml: ''
     });
