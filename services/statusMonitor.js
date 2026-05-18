@@ -831,10 +831,11 @@ function startStatusMonitor() {
     const resolvedStatePath = path.resolve(config.serverStatus.statePath);
 
     console.log(
-        `[Status Monitor] Started [target=${config.serverStatus.host}:${config.serverStatus.port}]` +
-        ` [intervalMs=${config.serverStatus.intervalMs}] [timeoutMs=${config.serverStatus.timeoutMs}]` +
-        ` [failureThreshold=${FAILURE_THRESHOLD}] [keepAliveGraceMs=${KEEP_ALIVE_GRACE_MS}]` +
-        ` [output=${resolvedOutputPath}] [state=${resolvedStatePath}]`
+        '[Status Monitor] Started\n' +
+        `[target=${config.serverStatus.host}:${config.serverStatus.port}]\n` +
+        `[intervalMs=${config.serverStatus.intervalMs}]\n` +
+        `[output=${resolvedOutputPath}]\n` +
+        `[state=${resolvedStatePath}]`
     );
 
     let running = false;
@@ -873,7 +874,7 @@ function startStatusMonitor() {
         }
 
         if (errorText) {
-            extras.push(`ProbeError=${errorText}`);
+            extras.push(`${config.serverStatus.host}:${config.serverStatus.port}`);
         }
 
         if (warningText) {
