@@ -39,7 +39,8 @@ module.exports.getState = function() {
         character: server.Character || '',
         chatRoom: server.ChatRoom || '',
         roomId: server.ChatRoomID || 0,
-        serverName: server.SWGServerName || server.ServerName || ''
+        serverName: server.SWGServerName || server.ServerName || '',
+        joinChatRoom: server.JoinChatRoom !== false
     };
 }
 module.exports.sendChat = function(message, user) {
@@ -68,6 +69,51 @@ module.exports.sendConsoleCommand = function(command) {
     }
 
     send("ExecuteConsoleCommand", {Command: normalizedCommand});
+}
+module.exports.sendGameCommand = function(command) {
+    if (!module.exports.isConnected) return false;
+
+    const normalizedCommand = String(command || '')
+        .trim()
+        .replace(/^\//, '')
+        .toLowerCase();
+
+    const knownCommands = {
+        startdance: {
+            commandCrc: 0x7B1DCBE0,
+            commandValue: 0x40000020
+        },
+        flourish: {
+            commandCrc: 0xC8998CE9,
+            commandValue: 0
+        }
+    };
+
+    const knownCommand = knownCommands[normalizedCommand];
+
+    if (!knownCommand || !Buffer.isBuffer(server.CharacterID) || server.CharacterID.length !== 8) {
+        module.exports.sendConsoleCommand(command);
+        return false;
+    }
+
+    if (verboseSWGLogging) {
+        console.log(
+            getFullTimestamp()
+            + " - [SWG Chat] Sending game command: "
+            + normalizedCommand
+            + " [crc=0x"
+            + knownCommand.commandCrc.toString(16).toUpperCase()
+            + "]"
+        );
+    }
+
+    send("CommandQueueEnqueue", {
+        CharacterID: server.CharacterID,
+        CommandCRC: knownCommand.commandCrc,
+        CommandValue: knownCommand.commandValue
+    });
+
+    return true;
 }
 module.exports.recvTell = function(from, message) {}
 
@@ -164,7 +210,15 @@ handlePacket["EnumerateCharacterId"] = function(packet) {
 handlePacket["ClientPermissions"] = function(packet) {
     send("SelectCharacter", {CharacterID: server.CharacterID});
     setTimeout(() => {
-        send("ChatCreateRoom", {RoomPath: `SWG.${server.ServerName}.${server.ChatRoom}`})
+        if (server.JoinChatRoom === false) {
+            send("CmdSceneReady");
+            setTimeout(() => {
+                markConnected("Scene ready without chat room as " + server.Character);
+            }, 1000);
+            return;
+        }
+
+        send("ChatCreateRoom", {RoomPath: `SWG.${server.ServerName}.${server.ChatRoom}`});
         setTimeout(() => send("CmdSceneReady"), 1000);
     }, 1000);
 }
@@ -181,15 +235,22 @@ handlePacket["ChatRoomList"] = function(packet) {
 handlePacket["ChatOnEnteredRoom"] = function(packet) {
     if (verboseSWGLogging) console.log(JSON.stringify(packet, null, 2));
     if (packet.RoomID == server.ChatRoomID && packet.PlayerName == server.Character) {
-        if (!module.exports.isConnected) {
-            module.exports.isConnected = true;
-            console.log(getFullTimestamp() + " - [SWG Chat] Joined room " + packet.RoomID + " as " + packet.PlayerName);
-            module.exports.reconnected();
-        }
-        const failureThreshold = Math.max(1, Number(server.failureThreshold || 3));
-        if (fails >= failureThreshold) module.exports.serverUp();
-        fails = 0;
+        markConnected("Joined room " + packet.RoomID + " as " + packet.PlayerName);
     }
+}
+
+function markConnected(detail) {
+    if (!module.exports.isConnected) {
+        module.exports.isConnected = true;
+        if (detail) {
+            console.log(getFullTimestamp() + " - [SWG Chat] " + detail);
+        }
+        module.exports.reconnected();
+    }
+
+    const failureThreshold = Math.max(1, Number(server.failureThreshold || 3));
+    if (fails >= failureThreshold) module.exports.serverUp();
+    fails = 0;
 }
 handlePacket["ChatRoomMessage"] = function(packet) {
     if (verboseSWGLogging) console.log(JSON.stringify(packet, null, 2));

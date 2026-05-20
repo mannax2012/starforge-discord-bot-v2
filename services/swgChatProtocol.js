@@ -532,6 +532,28 @@ EncodeSWGPacket["ExecuteConsoleCommand"] = function(data) {
     return Encrypt(Buffer.concat([EncodeSOEHeader(0xb1cfce1c, 1), payload.subarray(0, payload.off)]));
 }
 
+EncodeSWGPacket["CommandQueueEnqueue"] = function(data) {
+    const header = EncodeSOEHeader(0x80ce5e46, 5);
+    const body = Buffer.alloc(40);
+    const characterId = data && Buffer.isBuffer(data.CharacterID) ? data.CharacterID : null;
+
+    if (!characterId || characterId.length !== 8) {
+        return false;
+    }
+
+    body.writeUInt32LE(0x23, 0);
+    body.writeUInt32LE(0x116, 4);
+    characterId.copy(body, 8);
+    body.writeUInt32LE(0, 16);
+    body.writeUInt32LE((data && data.CommandValue) >>> 0, 20);
+    body.writeUInt32LE((data && data.CommandCRC) >>> 0, 24);
+    body.writeUInt32LE(0, 28);
+    body.writeUInt32LE(0, 32);
+    body.writeUInt32LE(0, 36);
+
+    return Encrypt(Buffer.concat([header, body]));
+}
+
 DecodeSWGPacket[0xbc6bddf2] = function(data) {
     return {type: "ChatEnterRoomById",
         RequestID: data.readUInt32LE(0),

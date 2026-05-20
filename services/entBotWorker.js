@@ -2,6 +2,7 @@ const config = require('../config');
 const swgChatClient = require('./swgChatClient');
 
 let flourishTimer = null;
+let startupTimer = null;
 let started = false;
 
 function getSettings() {
@@ -16,12 +17,16 @@ function getMissingSettings(settings) {
     if (!settings.username) missing.push('ENT_BOT_USERNAME');
     if (!settings.password) missing.push('ENT_BOT_PASSWORD');
     if (!settings.character) missing.push('ENT_BOT_CHARACTER');
-    if (!settings.chatRoom) missing.push('ENT_BOT_ROOM');
 
     return missing;
 }
 
 function clearPerformanceLoop() {
+    if (startupTimer) {
+        clearTimeout(startupTimer);
+        startupTimer = null;
+    }
+
     if (!flourishTimer) {
         return;
     }
@@ -33,8 +38,9 @@ function clearPerformanceLoop() {
 function sendPerformanceCommands() {
     const settings = getSettings();
 
-    swgChatClient.sendConsoleCommand(settings.danceCommand);
-    swgChatClient.sendConsoleCommand(settings.flourishCommand);
+    console.log(`[EntBot] Sending performance commands [dance=${settings.danceCommand}] [flourish=${settings.flourishCommand}]`);
+    swgChatClient.sendGameCommand(settings.danceCommand);
+    swgChatClient.sendGameCommand(settings.flourishCommand);
 }
 
 function startPerformanceLoop() {
@@ -60,8 +66,12 @@ function attachCallbacks() {
     swgChatClient.reconnected = function () {
         const state = swgChatClient.getState();
         console.log(`[EntBot] Connected [character=${state.character}] [room=${state.chatRoom}]`);
-        sendPerformanceCommands();
-        startPerformanceLoop();
+        clearPerformanceLoop();
+        startupTimer = setTimeout(() => {
+            startupTimer = null;
+            sendPerformanceCommands();
+            startPerformanceLoop();
+        }, 2500);
     };
 }
 
@@ -86,7 +96,7 @@ function startEntBotWorker() {
         Username: settings.username,
         Password: settings.password,
         Character: settings.character,
-        ChatRoom: settings.chatRoom,
+        JoinChatRoom: false,
         verboseSWGLogging: settings.verboseSwgLogging,
         connectionTimeoutMs: settings.connectionTimeoutMs,
         failureThreshold: settings.failureThreshold
