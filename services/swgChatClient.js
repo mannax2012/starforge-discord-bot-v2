@@ -57,6 +57,18 @@ module.exports.sendTell = function(player, message) {
     	console.log(getFullTimestamp() + " - [SWG Chat] Sending tell to " + player);
     send("ChatInstantMessageToCharacter", {ServerName: server.ServerName, PlayerName: player, Message: message});
 }
+module.exports.sendConsoleCommand = function(command) {
+    if (!module.exports.isConnected) return;
+
+    const normalizedCommand = String(command || '').trim();
+    if (!normalizedCommand) return;
+
+    if (verboseSWGLogging) {
+        console.log(getFullTimestamp() + " - [SWG Chat] Sending console command: " + normalizedCommand);
+    }
+
+    send("ExecuteConsoleCommand", {Command: normalizedCommand});
+}
 module.exports.recvTell = function(from, message) {}
 
 var lastMessageTime = new Date();

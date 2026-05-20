@@ -522,6 +522,16 @@ EncodeSWGPacket["CmdSceneReady"] = function() {
     return Encrypt(EncodeSOEHeader(0x43fd1c22, 1));
 }
 
+EncodeSWGPacket["ExecuteConsoleCommand"] = function(data) {
+    const command = String((data && data.Command) || '');
+    const payload = Buffer.alloc(2 + Buffer.byteLength(command, "ascii"));
+
+    payload.off = 0;
+    writeAString(payload, command);
+
+    return Encrypt(Buffer.concat([EncodeSOEHeader(0xb1cfce1c, 1), payload.subarray(0, payload.off)]));
+}
+
 DecodeSWGPacket[0xbc6bddf2] = function(data) {
     return {type: "ChatEnterRoomById",
         RequestID: data.readUInt32LE(0),

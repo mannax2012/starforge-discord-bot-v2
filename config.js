@@ -34,6 +34,7 @@ const botLogEnabled = envBool('DISCORD_BOT_LOG_ENABLED', isLiveMode);
 const webApiEnabled = envBool('WEB_LISTENER_ENABLED', true);
 const statusEnabled = envBool('STATUS_MONITOR_ENABLED', true);
 const swgChatEnabled = envBool('SWG_CHAT_ENABLED', false);
+const entBotEnabled = envBool('ENT_BOT_ENABLED', false);
 
 module.exports = {
     mode: isTcMode ? 'tc' : 'live',
@@ -48,7 +49,8 @@ module.exports = {
         botLogEnabled,
         webApiEnabled,
         statusEnabled,
-        swgChatEnabled
+        swgChatEnabled,
+        entBotEnabled
     },
 
     token: env('DISCORD_TOKEN'),
@@ -157,6 +159,32 @@ module.exports = {
         failureThreshold: envInt('SWG_CHAT_FAILURE_THRESHOLD', 3),
         verboseSwgLogging: envBool('SWG_CHAT_VERBOSE_SWG_LOGGING', false),
         verboseDiscordLogging: envBool('SWG_CHAT_VERBOSE_DISCORD_LOGGING', false)
+    },
+
+    entBot: {
+        enabled: entBotEnabled,
+        loginAddress: env(
+            'ENT_BOT_LOGIN_ADDRESS',
+            isTcMode
+                ? env('LAUNCHER_TC_LOGIN_SERVER_ADDRESS', 'testcenter.swg-starforge.com')
+                : env('LAUNCHER_LOGIN_SERVER_ADDRESS', 'login.swg-starforge.com')
+        ),
+        loginPort: envInt(
+            'ENT_BOT_LOGIN_PORT',
+            isTcMode
+                ? envInt('LAUNCHER_TC_LOGIN_SERVER_PORT', 44453)
+                : envInt('LAUNCHER_LOGIN_SERVER_PORT', 44553)
+        ),
+        username: env('ENT_BOT_USERNAME'),
+        password: env('ENT_BOT_PASSWORD'),
+        character: env('ENT_BOT_CHARACTER'),
+        chatRoom: env('ENT_BOT_ROOM', 'General'),
+        danceCommand: env('ENT_BOT_DANCE_COMMAND', '/startdance'),
+        flourishCommand: env('ENT_BOT_FLOURISH_COMMAND', '/flourish'),
+        intervalMs: envInt('ENT_BOT_INTERVAL_MS', 3000),
+        connectionTimeoutMs: envInt('ENT_BOT_CONNECTION_TIMEOUT_MS', 10000),
+        failureThreshold: envInt('ENT_BOT_FAILURE_THRESHOLD', 3),
+        verboseSwgLogging: envBool('ENT_BOT_VERBOSE_SWG_LOGGING', false)
     },
 
     db: {

@@ -180,6 +180,48 @@ async function getAccountEmail(username) {
     return registerRows.length ? String(registerRows[0].email || '').trim() : '';
 }
 
+async function findAccountsByEmail(email) {
+    const normalizedEmail = String(email || '').trim();
+
+    if (!normalizedEmail) {
+        return {
+            success: false,
+            statusCode: 400,
+            message: 'Email is required.',
+            data: []
+        };
+    }
+
+    if (!isValidEmail(normalizedEmail) || normalizedEmail.length > 100) {
+        return {
+            success: false,
+            statusCode: 400,
+            message: 'A valid email address is required.',
+            data: []
+        };
+    }
+
+    const [registerRows] = await pool.execute(
+        `SELECT DISTINCT username, email
+         FROM register
+         WHERE TRIM(LOWER(email)) = TRIM(LOWER(?))
+         ORDER BY username ASC`,
+        [normalizedEmail]
+    );
+
+    return {
+        success: true,
+        statusCode: 200,
+        message: registerRows.length
+            ? 'Accounts loaded successfully.'
+            : 'No accounts were found for that email.',
+        data: registerRows.map((row) => ({
+            username: String(row.username || ''),
+            email: String(row.email || '').trim()
+        }))
+    };
+}
+
 async function changeEmail(username, email) {
     const normalizedUsername = String(username || '').trim();
     const normalizedEmail = String(email || '').trim();
@@ -483,6 +525,7 @@ async function activateAccountByUsername(username, options) {
 
 module.exports = {
     getAccountProfile,
+    findAccountsByEmail,
     changeEmail,
     changePassword,
     adminResetPassword,

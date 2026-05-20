@@ -7,6 +7,7 @@ const { registerUser, generateUniqueStationId } = require('./services/registerAc
 const { postActivationReview } = require('./services/activationReview');
 const {
     getAccountProfile,
+    findAccountsByEmail,
     changeEmail,
     changePassword,
     adminResetPassword,
@@ -749,6 +750,39 @@ app.post('/api/admin/sync-account-to-tc', requireSharedSecret, async function (r
             success: false,
             message: 'Internal account sync error.',
             data: null
+        });
+    }
+});
+
+app.post('/api/admin/account-email-lookup', requireSharedSecret, async function (req, res) {
+    try {
+        if (config.isTcMode) {
+            return res.status(403).json({
+                success: false,
+                message: 'Account email lookup is only available from the Live API instance.',
+                data: []
+            });
+        }
+
+        const email = req.body ? req.body.email : '';
+        const result = await findAccountsByEmail(email);
+
+        logApiResult('API Admin Account Email Lookup', result, [
+            `email=${String(email || '').trim() || 'missing'}`
+        ]);
+
+        return res.status(result.statusCode || (result.success ? 200 : 400)).json({
+            success: result.success,
+            message: result.message,
+            data: Array.isArray(result.data) ? result.data : []
+        });
+    } catch (error) {
+        console.error(`[API Admin Account Email Lookup] ${getErrorMessage(error)}`);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Internal account email lookup error.',
+            data: []
         });
     }
 });
