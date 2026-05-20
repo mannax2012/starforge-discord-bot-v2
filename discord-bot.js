@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
 const config = require('./config');
+const { startEntBotService } = require('./services/entBotService');
 const { startStatusMonitor } = require('./services/statusMonitor');
 const { startWebApi } = require('./web-api');
 
@@ -45,6 +46,10 @@ async function startHeadlessMode() {
 
     if (config.features.webApiEnabled) {
         startWebApi(null);
+    }
+
+    if (config.features.entBotEnabled) {
+        startEntBotService();
     }
 }
 
