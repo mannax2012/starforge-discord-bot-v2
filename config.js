@@ -181,6 +181,7 @@ module.exports = {
         chatRoom: env('ENT_BOT_ROOM', 'General'),
         danceCommand: env('ENT_BOT_DANCE_COMMAND', '/startdance'),
         flourishCommand: env('ENT_BOT_FLOURISH_COMMAND', '/flourish'),
+        announceCommands: envBool('ENT_BOT_ANNOUNCE_COMMANDS', true),
         intervalMs: envInt('ENT_BOT_INTERVAL_MS', 3000),
         connectionTimeoutMs: envInt('ENT_BOT_CONNECTION_TIMEOUT_MS', 10000),
         failureThreshold: envInt('ENT_BOT_FAILURE_THRESHOLD', 3),

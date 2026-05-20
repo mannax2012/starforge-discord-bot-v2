@@ -39,6 +39,12 @@ function sendPerformanceCommands() {
     const settings = getSettings();
 
     console.log(`[EntBot] Sending performance commands [dance=${settings.danceCommand}] [flourish=${settings.flourishCommand}]`);
+    if (settings.announceCommands) {
+        swgChatClient.sendTell(
+            settings.character,
+            `[EntBot] firing ${settings.danceCommand} then ${settings.flourishCommand}`
+        );
+    }
     swgChatClient.sendGameCommand(settings.danceCommand);
     swgChatClient.sendGameCommand(settings.flourishCommand);
 }
