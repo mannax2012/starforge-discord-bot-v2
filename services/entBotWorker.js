@@ -38,13 +38,6 @@ function clearPerformanceLoop() {
 function sendPerformanceCommands() {
     const settings = getSettings();
 
-    console.log(`[EntBot] Sending performance commands [dance=${settings.danceCommand}] [flourish=${settings.flourishCommand}]`);
-    if (settings.announceCommands) {
-        swgChatClient.sendTell(
-            settings.character,
-            `[EntBot] firing ${settings.danceCommand} then ${settings.flourishCommand}`
-        );
-    }
     swgChatClient.sendGameCommand(settings.danceCommand);
     swgChatClient.sendGameCommand(settings.flourishCommand);
 }
@@ -71,10 +64,21 @@ function attachCallbacks() {
 
     swgChatClient.reconnected = function () {
         const state = swgChatClient.getState();
+        const settings = getSettings();
         console.log(`[EntBot] Connected [character=${state.character}] [room=${state.chatRoom}]`);
         clearPerformanceLoop();
         startupTimer = setTimeout(() => {
             startupTimer = null;
+            console.log(
+                `[EntBot] Performance loop started [dance=${settings.danceCommand}] `
+                + `[flourish=${settings.flourishCommand}] [intervalMs=${settings.intervalMs || 3000}]`
+            );
+            if (settings.announceCommands) {
+                swgChatClient.sendTell(
+                    settings.character,
+                    `[EntBot] started ${settings.danceCommand} + ${settings.flourishCommand} every ${settings.intervalMs || 3000}ms`
+                );
+            }
             sendPerformanceCommands();
             startPerformanceLoop();
         }, 2500);
