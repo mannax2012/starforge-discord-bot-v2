@@ -8,12 +8,18 @@ module.exports.login = function(cfg) {
     SOEProtocol.setVerboseLogging(verboseSWGLogging);
     fails = 0;
     commandQueueCounter = 0x40000000;
+    reconnectAttempt = 0;
+    lastConnectedDurationMs = 0;
     lastMessageTime = new Date();
     Login();
 }
 
 var verboseSWGLogging = false;
 var commandQueueCounter = 0x40000000;
+var reconnectAttempt = 0;
+var reconnectTimer = null;
+var connectedSince = 0;
+var lastConnectedDurationMs = 0;
 module.exports.debug = function() {
     verboseSWGLogging = true;
     SOEProtocol.setVerboseLogging(true);
@@ -30,6 +36,8 @@ module.exports.setPaused = function(value) {
 module.exports.restart = function() {
     fails = 0;
     commandQueueCounter = 0x40000000;
+    reconnectAttempt = 0;
+    lastConnectedDurationMs = 0;
     lastMessageTime = new Date();
     Login();
 }
@@ -157,7 +165,7 @@ function handleMessage(msg, info) {
         }
     } catch (ex) {
         console.error(getFullTimestamp() + " - [SWG Chat] Decode failed for header 0x" + header.toString(16).toUpperCase().padStart(4, 0) + ": " + ex.toString());
-        Login();
+        scheduleReconnect("decode failure");
         return;
     }
 
@@ -264,8 +272,17 @@ handlePacket["ChatOnEnteredRoom"] = function(packet) {
 }
 
 function markConnected(detail) {
+    clearReconnectTimer();
+
+    const stableResetMs = Math.max(0, Number(server.reconnectStableResetMs || 300000));
+    if (lastConnectedDurationMs === 0 || stableResetMs === 0 || lastConnectedDurationMs >= stableResetMs) {
+        reconnectAttempt = 0;
+    }
+    lastConnectedDurationMs = 0;
+
     if (!module.exports.isConnected) {
         module.exports.isConnected = true;
+        connectedSince = Date.now();
         if (detail) {
             console.log(getFullTimestamp() + " - [SWG Chat] " + detail);
         }
@@ -293,13 +310,16 @@ handlePacket["ChatOnLeaveRoom"] = function(packet) {
 var disconnectCount = 0;
 handlePacket["Disconnect"] = function(packet) {
     console.warn(getFullTimestamp() + " - [SWG Chat] Disconnect received [connectionId=" + packet.connectionID + "] [reason=" + packet.reasonID + "] [count=" + disconnectCount++ + "]");
+    scheduleReconnect("server disconnect reason=" + packet.reasonID);
 }
 
 //handlePacket["ServerNetStatusUpdate"] = function(packet) {} //This is network status packet from server, no response required
 
 function Login() {
+    clearReconnectTimer();
     loggedIn = false;
     module.exports.isConnected = false;
+    connectedSince = 0;
     safeCloseSocket();
 
     if (!server.LoginAddress || !server.LoginPort) {
@@ -315,9 +335,58 @@ function Login() {
     socket.on('message', handleMessage);
     socket.on('error', (error) => {
         console.error(getFullTimestamp() + " - [SWG Chat] Socket error: " + error.message);
+        scheduleReconnect("socket error");
     });
 
     send("SessionRequest");
+}
+
+function clearReconnectTimer() {
+    if (!reconnectTimer) {
+        return;
+    }
+
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+}
+
+function scheduleReconnect(reason) {
+    if (reconnectTimer) {
+        return false;
+    }
+
+    module.exports.isConnected = false;
+    lastConnectedDurationMs = connectedSince ? (Date.now() - connectedSince) : 0;
+    connectedSince = 0;
+    safeCloseSocket();
+
+    const baseDelayMs = Math.max(1000, Number(server.reconnectBaseDelayMs || 5000));
+    const maxDelayMs = Math.max(baseDelayMs, Number(server.reconnectMaxDelayMs || 60000));
+    const jitterMs = Math.max(0, Number(server.reconnectJitterMs || 1500));
+    const exponentialDelay = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, reconnectAttempt));
+    const randomizedJitter = jitterMs > 0 ? Math.floor(Math.random() * (jitterMs + 1)) : 0;
+    const delayMs = exponentialDelay + randomizedJitter;
+
+    reconnectAttempt += 1;
+
+    console.warn(
+        getFullTimestamp()
+        + " - [SWG Chat] Scheduling reconnect in "
+        + delayMs
+        + "ms"
+        + (reason ? " [reason=" + reason + "]" : "")
+        + " [attempt="
+        + reconnectAttempt
+        + "]"
+    );
+
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        lastMessageTime = new Date();
+        Login();
+    }, delayMs);
+
+    return true;
 }
 
 function safeCloseSocket() {
@@ -364,9 +433,10 @@ setInterval(() => {
     if (new Date() - lastMessageTime > connectionTimeoutMs) {
         fails++;
         module.exports.isConnected = false;
+        connectedSince = 0;
         if (fails == failureThreshold) module.exports.serverDown();
         lastMessageTime = new Date();
-        Login();
+        scheduleReconnect("connection timeout");
     }
 }, 100);
 

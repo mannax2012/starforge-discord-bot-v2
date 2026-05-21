@@ -157,6 +157,10 @@ module.exports = {
         autoReplyToUnknownTells: env('SWG_CHAT_TELL_AUTO_REPLY', "[Chat Bot] This message is automated: Please contact server administration for any questions or issues."),
         connectionTimeoutMs: envInt('SWG_CHAT_CONNECTION_TIMEOUT_MS', 10000),
         failureThreshold: envInt('SWG_CHAT_FAILURE_THRESHOLD', 3),
+        reconnectBaseDelayMs: envInt('SWG_CHAT_RECONNECT_BASE_DELAY_MS', 5000),
+        reconnectMaxDelayMs: envInt('SWG_CHAT_RECONNECT_MAX_DELAY_MS', 60000),
+        reconnectJitterMs: envInt('SWG_CHAT_RECONNECT_JITTER_MS', 1500),
+        reconnectStableResetMs: envInt('SWG_CHAT_RECONNECT_STABLE_RESET_MS', 300000),
         verboseSwgLogging: envBool('SWG_CHAT_VERBOSE_SWG_LOGGING', false),
         verboseDiscordLogging: envBool('SWG_CHAT_VERBOSE_DISCORD_LOGGING', false)
     },
@@ -202,6 +206,10 @@ module.exports = {
         intervalMs: envInt('ENT_BOT_INTERVAL_MS', 3000),
         connectionTimeoutMs: envInt('ENT_BOT_CONNECTION_TIMEOUT_MS', 10000),
         failureThreshold: envInt('ENT_BOT_FAILURE_THRESHOLD', 3),
+        reconnectBaseDelayMs: envInt('ENT_BOT_RECONNECT_BASE_DELAY_MS', 5000),
+        reconnectMaxDelayMs: envInt('ENT_BOT_RECONNECT_MAX_DELAY_MS', 60000),
+        reconnectJitterMs: envInt('ENT_BOT_RECONNECT_JITTER_MS', 1500),
+        reconnectStableResetMs: envInt('ENT_BOT_RECONNECT_STABLE_RESET_MS', 300000),
         verboseSwgLogging: envBool('ENT_BOT_VERBOSE_SWG_LOGGING', false)
     },
 
