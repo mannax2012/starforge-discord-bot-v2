@@ -7,11 +7,13 @@ module.exports.login = function(cfg) {
     verboseSWGLogging = Boolean(server.verboseSWGLogging);
     SOEProtocol.setVerboseLogging(verboseSWGLogging);
     fails = 0;
+    commandQueueCounter = 0x40000000;
     lastMessageTime = new Date();
     Login();
 }
 
 var verboseSWGLogging = false;
+var commandQueueCounter = 0x40000000;
 module.exports.debug = function() {
     verboseSWGLogging = true;
     SOEProtocol.setVerboseLogging(true);
@@ -27,6 +29,7 @@ module.exports.setPaused = function(value) {
 }
 module.exports.restart = function() {
     fails = 0;
+    commandQueueCounter = 0x40000000;
     lastMessageTime = new Date();
     Login();
 }
@@ -73,34 +76,44 @@ module.exports.sendConsoleCommand = function(command) {
 module.exports.sendGameCommand = function(command) {
     if (!module.exports.isConnected) return false;
 
-    const normalizedCommand = String(command || '')
+    const normalizedInput = String(command || '').trim().replace(/^\//, '');
+    if (!normalizedInput) return false;
+
+    const firstSpaceIndex = normalizedInput.indexOf(' ');
+    const commandName = (firstSpaceIndex === -1 ? normalizedInput : normalizedInput.slice(0, firstSpaceIndex))
         .trim()
-        .replace(/^\//, '')
         .toLowerCase();
+    const commandArguments = (firstSpaceIndex === -1 ? '' : normalizedInput.slice(firstSpaceIndex + 1)).trim();
 
     const knownCommands = {
         startdance: {
-            commandCrc: 0x7B1DCBE0,
-            commandValue: 0x40000020
+            commandCrc: 0x7B1DCBE0
         },
         flourish: {
-            commandCrc: 0xC8998CE9,
-            commandValue: 0
+            commandCrc: 0xC8998CE9
         }
     };
 
-    const knownCommand = knownCommands[normalizedCommand];
+    const knownCommand = knownCommands[commandName];
 
-    if (!knownCommand || !Buffer.isBuffer(server.CharacterID) || server.CharacterID.length !== 8) {
-        module.exports.sendConsoleCommand(command);
+    if (!knownCommand) {
+        console.warn(getFullTimestamp() + " - [SWG Chat] Unsupported game command: " + normalizedInput);
         return false;
     }
+
+    if (!Buffer.isBuffer(server.CharacterID) || server.CharacterID.length !== 8) {
+        console.warn(getFullTimestamp() + " - [SWG Chat] Cannot send game command before CharacterID is ready: " + normalizedInput);
+        return false;
+    }
+
+    commandQueueCounter += 0x20;
 
     if (verboseSWGLogging) {
         console.log(
             getFullTimestamp()
             + " - [SWG Chat] Sending game command: "
-            + normalizedCommand
+            + commandName
+            + (commandArguments ? " [" + commandArguments + "]" : "")
             + " [crc=0x"
             + knownCommand.commandCrc.toString(16).toUpperCase()
             + "]"
@@ -109,8 +122,10 @@ module.exports.sendGameCommand = function(command) {
 
     send("CommandQueueEnqueue", {
         CharacterID: server.CharacterID,
+        ActionCount: commandQueueCounter >>> 0,
         CommandCRC: knownCommand.commandCrc,
-        CommandValue: knownCommand.commandValue
+        TargetID: 0,
+        Arguments: commandArguments
     });
 
     return true;

@@ -533,25 +533,26 @@ EncodeSWGPacket["ExecuteConsoleCommand"] = function(data) {
 }
 
 EncodeSWGPacket["CommandQueueEnqueue"] = function(data) {
-    const header = EncodeSOEHeader(0x80ce5e46, 5);
-    const body = Buffer.alloc(40);
     const characterId = data && Buffer.isBuffer(data.CharacterID) ? data.CharacterID : null;
+    const argumentsString = String((data && data.Arguments) || '');
+    const body = Buffer.alloc(40 + (argumentsString.length * 2));
 
     if (!characterId || characterId.length !== 8) {
         return false;
     }
 
+    body.off = 0;
     body.writeUInt32LE(0x23, 0);
     body.writeUInt32LE(0x116, 4);
     characterId.copy(body, 8);
     body.writeUInt32LE(0, 16);
-    body.writeUInt32LE((data && data.CommandValue) >>> 0, 20);
+    body.writeUInt32LE((data && data.ActionCount) >>> 0, 20);
     body.writeUInt32LE((data && data.CommandCRC) >>> 0, 24);
-    body.writeUInt32LE(0, 28);
-    body.writeUInt32LE(0, 32);
-    body.writeUInt32LE(0, 36);
+    body.writeBigUInt64LE(BigInt((data && data.TargetID) || 0), 28);
+    body.off = 36;
+    writeUString(body, argumentsString);
 
-    return Encrypt(Buffer.concat([header, body]));
+    return Encrypt(Buffer.concat([EncodeSOEHeader(0x80ce5e46, 5), body.subarray(0, body.off)]));
 }
 
 DecodeSWGPacket[0xbc6bddf2] = function(data) {
