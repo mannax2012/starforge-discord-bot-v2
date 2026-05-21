@@ -182,6 +182,7 @@ module.exports = {
         danceCommand: env('ENT_BOT_DANCE_COMMAND', '/startdance'),
         flourishCommand: env('ENT_BOT_FLOURISH_COMMAND', '/flourish'),
         announceCommands: envBool('ENT_BOT_ANNOUNCE_COMMANDS', true),
+        autoInviteOnTell: envBool('ENT_BOT_AUTO_INVITE_ON_TELL', false),
         advertsEnabled: envBool('ENT_BOT_ADVERTS_ENABLED', false),
         advertIntervalMs: envInt('ENT_BOT_ADVERT_INTERVAL_MS', 120000),
         advertChannels: env('ENT_BOT_ADVERT_CHANNELS', 'spatialChat,planetSay')

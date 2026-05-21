@@ -101,6 +101,23 @@ function startPerformanceLoop() {
 }
 
 function attachCallbacks() {
+    swgChatClient.recvTell = function (from, message) {
+        const settings = getSettings();
+        const sender = String(from || '').trim();
+        const character = String(settings.character || '').trim();
+
+        if (!settings.autoInviteOnTell || !sender) {
+            return;
+        }
+
+        if (sender.toLowerCase() === character.toLowerCase()) {
+            return;
+        }
+
+        console.log(`[EntBot] Auto-invite requested from tell [from=${sender}]`);
+        swgChatClient.sendGameCommand(`/invite ${sender}`);
+    };
+
     swgChatClient.serverDown = function () {
         console.warn('[EntBot] Lost contact with the SWG server.');
     };

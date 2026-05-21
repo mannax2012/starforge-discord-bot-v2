@@ -86,6 +86,9 @@ module.exports.sendGameCommand = function(command) {
     const commandArguments = (firstSpaceIndex === -1 ? '' : normalizedInput.slice(firstSpaceIndex + 1)).trim();
 
     const knownCommands = {
+        invite: {
+            commandCrc: 0x88505D58
+        },
         planetsay: {
             commandCrc: 0xB43480A0
         },
