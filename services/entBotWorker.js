@@ -3,6 +3,8 @@ const swgChatClient = require('./swgChatClient');
 
 let flourishTimer = null;
 let startupTimer = null;
+let advertTimer = null;
+let advertIndex = 0;
 let started = false;
 
 function getSettings() {
@@ -33,6 +35,51 @@ function clearPerformanceLoop() {
 
     clearInterval(flourishTimer);
     flourishTimer = null;
+}
+
+function clearAdvertLoop() {
+    if (!advertTimer) {
+        return;
+    }
+
+    clearInterval(advertTimer);
+    advertTimer = null;
+}
+
+function sendAdvertMessage() {
+    const settings = getSettings();
+    const channels = Array.isArray(settings.advertChannels) ? settings.advertChannels : [];
+    const messages = Array.isArray(settings.advertMessages) ? settings.advertMessages : [];
+
+    if (!settings.advertsEnabled || channels.length === 0 || messages.length === 0) {
+        return false;
+    }
+
+    const message = messages[advertIndex % messages.length];
+    advertIndex += 1;
+
+    for (const channel of channels) {
+        swgChatClient.sendGameCommand(`/${channel} ${message}`);
+    }
+
+    return true;
+}
+
+function startAdvertLoop() {
+    clearAdvertLoop();
+
+    const settings = getSettings();
+    const channels = Array.isArray(settings.advertChannels) ? settings.advertChannels : [];
+    const messages = Array.isArray(settings.advertMessages) ? settings.advertMessages : [];
+
+    if (!settings.advertsEnabled || channels.length === 0 || messages.length === 0) {
+        return;
+    }
+
+    const intervalMs = Math.max(120000, Number(settings.advertIntervalMs || 120000));
+    advertTimer = setInterval(() => {
+        sendAdvertMessage();
+    }, intervalMs);
 }
 
 function sendPerformanceCommands() {
@@ -67,6 +114,7 @@ function attachCallbacks() {
         const settings = getSettings();
         console.log(`[EntBot] Connected [character=${state.character}] [room=${state.chatRoom}]`);
         clearPerformanceLoop();
+        clearAdvertLoop();
         startupTimer = setTimeout(() => {
             startupTimer = null;
             console.log(
@@ -81,6 +129,14 @@ function attachCallbacks() {
             }
             sendPerformanceCommands();
             startPerformanceLoop();
+            if (settings.advertsEnabled && settings.advertMessages.length > 0 && settings.advertChannels.length > 0) {
+                console.log(
+                    `[EntBot] Advert loop started [channels=${settings.advertChannels.join(',')}] `
+                    + `[intervalMs=${settings.advertIntervalMs || 120000}] [messages=${settings.advertMessages.length}]`
+                );
+                sendAdvertMessage();
+                startAdvertLoop();
+            }
         }, 2500);
     };
 }
@@ -119,6 +175,7 @@ function startEntBotWorker() {
 
 function shutdown() {
     clearPerformanceLoop();
+    clearAdvertLoop();
     process.exit(0);
 }
 

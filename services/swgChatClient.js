@@ -86,6 +86,12 @@ module.exports.sendGameCommand = function(command) {
     const commandArguments = (firstSpaceIndex === -1 ? '' : normalizedInput.slice(firstSpaceIndex + 1)).trim();
 
     const knownCommands = {
+        planetsay: {
+            commandCrc: 0xB43480A0
+        },
+        spatialchat: {
+            commandCrc: 0xEE540CF7
+        },
         startdance: {
             commandCrc: 0x7B1DCBE0
         },
