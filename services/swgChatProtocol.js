@@ -555,6 +555,15 @@ EncodeSWGPacket["CommandQueueEnqueue"] = function(data) {
     return Encrypt(Buffer.concat([EncodeSOEHeader(0x80ce5e46, 5), body.subarray(0, body.off)]));
 }
 
+EncodeSWGPacket["ObjectMenuSelectMessage::MESSAGE_TYPE"] = function(data) {
+    const body = Buffer.alloc(9);
+
+    body.writeBigUInt64LE(BigInt((data && data.ObjectID) || 0), 0);
+    body.writeUInt8(Number((data && data.RadialID) || (data && data.MessageType) || 0) & 0xff, 8);
+
+    return Encrypt(Buffer.concat([EncodeSOEHeader(0x7ca18726, 3), body]));
+}
+
 DecodeSWGPacket[0xbc6bddf2] = function(data) {
     return {type: "ChatEnterRoomById",
         RequestID: data.readUInt32LE(0),
