@@ -22,6 +22,234 @@ function envBool(name, fallback = false) {
     return raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
 }
 
+function envJson(name, fallback = null) {
+    const raw = env(name, '');
+    if (raw === '') {
+        return fallback;
+    }
+
+    try {
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn(`[config] Failed to parse ${name} as JSON: ${error.message}`);
+        return fallback;
+    }
+}
+
+function normalizeString(value, fallback = '') {
+    if (value === undefined || value === null) {
+        return fallback;
+    }
+
+    return String(value);
+}
+
+function normalizeInt(value, fallback = 0) {
+    if (value === undefined || value === null || value === '') {
+        return fallback;
+    }
+
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+function normalizeBool(value, fallback = false) {
+    if (value === undefined || value === null || value === '') {
+        return fallback;
+    }
+
+    if (typeof value === 'boolean') {
+        return value;
+    }
+
+    const raw = String(value).trim().toLowerCase();
+    return raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
+}
+
+function normalizeStringArray(value, fallback = []) {
+    const resolved = value === undefined || value === null || value === ''
+        ? fallback
+        : value;
+
+    if (Array.isArray(resolved)) {
+        return resolved
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean);
+    }
+
+    return String(resolved || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
+function normalizeUnsignedId(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+        return BigInt(value).toString();
+    }
+
+    const normalized = String(value).trim();
+    if (!normalized) {
+        return null;
+    }
+
+    if (/^\d+$/.test(normalized) || /^0x[0-9a-f]+$/i.test(normalized)) {
+        try {
+            return BigInt(normalized).toString();
+        } catch (error) {
+            return null;
+        }
+    }
+
+    return null;
+}
+
+function normalizeUnsignedIdArray(value, fallback = []) {
+    const resolved = value === undefined || value === null || value === ''
+        ? fallback
+        : value;
+
+    const entries = Array.isArray(resolved)
+        ? resolved
+        : String(resolved || '')
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+
+    const uniqueIds = [];
+    for (const entry of entries) {
+        const objectId = normalizeUnsignedId(entry);
+        if (objectId === null || uniqueIds.includes(objectId)) {
+            continue;
+        }
+
+        uniqueIds.push(objectId);
+    }
+
+    return uniqueIds;
+}
+
+function normalizeByte(value, fallback = 0) {
+    const parsed = normalizeInt(value, fallback);
+    if (parsed < 0) {
+        return fallback;
+    }
+
+    if (parsed > 255) {
+        return 255;
+    }
+
+    return parsed;
+}
+
+function normalizeCommandList(value) {
+    if (Array.isArray(value)) {
+        return value
+            .map((entry) => String(entry || '').trim())
+            .filter(Boolean);
+    }
+
+    const command = String(value || '').trim();
+    return command ? [command] : [];
+}
+
+function resolvePerformanceCommands(settings) {
+    const explicitList = normalizeCommandList(settings.performanceCommands);
+    if (explicitList.length > 0) {
+        return explicitList;
+    }
+
+    const explicitCommand = String(settings.performanceCommand || '').trim();
+    if (explicitCommand) {
+        return [explicitCommand];
+    }
+
+    const performanceType = String(settings.performanceType || 'dance').trim().toLowerCase();
+    if (performanceType === 'music') {
+        const musicCommand = String(settings.musicCommand || '/startmusic').trim();
+        return musicCommand ? [musicCommand] : [];
+    }
+
+    const danceCommand = String(settings.danceCommand || '/startdance').trim();
+    return danceCommand ? [danceCommand] : [];
+}
+
+function resolveAdvertMessages(value, fallback = []) {
+    const normalized = normalizeStringArray(value, fallback);
+    if (normalized.length > 0) {
+        return normalized;
+    }
+
+    const single = String(value || '').trim();
+    return single ? [single] : [];
+}
+
+function buildEntertainerSettings(baseSettings, overrides = {}) {
+    const merged = {
+        ...baseSettings,
+        ...(overrides && typeof overrides === 'object' ? overrides : {})
+    };
+
+    const advertMessages = resolveAdvertMessages(merged.advertMessages, baseSettings.advertMessages);
+    const fallbackAdvertMessage = normalizeString(merged.advertMessage, '').trim();
+    if (advertMessages.length === 0 && fallbackAdvertMessage) {
+        advertMessages.push(fallbackAdvertMessage);
+    }
+
+    const settings = {
+        loginAddress: normalizeString(merged.loginAddress, baseSettings.loginAddress),
+        loginPort: normalizeInt(merged.loginPort, baseSettings.loginPort),
+        username: normalizeString(merged.username, ''),
+        password: normalizeString(merged.password, ''),
+        character: normalizeString(merged.character, ''),
+        chatRoom: normalizeString(merged.chatRoom, baseSettings.chatRoom),
+        performanceType: normalizeString(merged.performanceType, 'dance').trim().toLowerCase() || 'dance',
+        performanceCommand: normalizeString(merged.performanceCommand, ''),
+        performanceCommands: normalizeCommandList(merged.performanceCommands),
+        startupCommands: normalizeCommandList(merged.startupCommands),
+        petAutoCallEnabled: normalizeBool(merged.petAutoCallEnabled, false),
+        petAutoGroupEnabled: normalizeBool(merged.petAutoGroupEnabled, false),
+        petAutoGroupCommand: normalizeString(merged.petAutoGroupCommand, '/tellpet group'),
+        petDiscoveryEnabled: normalizeBool(merged.petDiscoveryEnabled, true),
+        petDiscoveryDebug: normalizeBool(merged.petDiscoveryDebug, false),
+        petControlDeviceIds: normalizeUnsignedIdArray(merged.petControlDeviceIds, baseSettings.petControlDeviceIds),
+        petCallRadialId: normalizeByte(merged.petCallRadialId, 44),
+        petCallPauseMs: Math.max(0, normalizeInt(merged.petCallPauseMs, 3000)),
+        danceCommand: normalizeString(merged.danceCommand, '/startdance'),
+        musicCommand: normalizeString(merged.musicCommand, '/startmusic'),
+        flourishCommand: normalizeString(merged.flourishCommand, ''),
+        startupCommandPauseMs: Math.max(0, normalizeInt(merged.startupCommandPauseMs, 3000)),
+        startupDelayMs: Math.max(0, normalizeInt(merged.startupDelayMs, 2500)),
+        intervalMs: normalizeInt(merged.intervalMs, 3000),
+        announceCommands: normalizeBool(merged.announceCommands, true),
+        autoInviteOnTell: normalizeBool(merged.autoInviteOnTell, false),
+        advertsEnabled: normalizeBool(merged.advertsEnabled, false),
+        advertIntervalMs: normalizeInt(merged.advertIntervalMs, 120000),
+        advertChannels: normalizeStringArray(merged.advertChannels, ['spatialChat', 'planetSay']),
+        advertMessages,
+        advertMessage: advertMessages[0] || '',
+        connectionTimeoutMs: normalizeInt(merged.connectionTimeoutMs, 10000),
+        failureThreshold: normalizeInt(merged.failureThreshold, 3),
+        reconnectBaseDelayMs: normalizeInt(merged.reconnectBaseDelayMs, 5000),
+        reconnectMaxDelayMs: normalizeInt(merged.reconnectMaxDelayMs, 60000),
+        reconnectJitterMs: normalizeInt(merged.reconnectJitterMs, 1500),
+        reconnectStableResetMs: normalizeInt(merged.reconnectStableResetMs, 300000),
+        verboseSwgLogging: normalizeBool(merged.verboseSwgLogging, false)
+    };
+
+    settings.performanceCommands = resolvePerformanceCommands(settings);
+    settings.petAutoGroupDelayMs = Math.max(
+        0,
+        normalizeInt(merged.petAutoGroupDelayMs, settings.petCallPauseMs)
+    );
+
+    return settings;
+}
+
 const botMode = String(env('BOT_MODE', 'live')).trim().toLowerCase();
 const isTcMode = botMode === 'tc' || botMode === 'testcenter';
 const isLiveMode = !isTcMode;
@@ -35,6 +263,74 @@ const webApiEnabled = envBool('WEB_LISTENER_ENABLED', true);
 const statusEnabled = envBool('STATUS_MONITOR_ENABLED', true);
 const swgChatEnabled = envBool('SWG_CHAT_ENABLED', false);
 const entBotEnabled = envBool('ENT_BOT_ENABLED', false);
+
+const baseEntBotSettings = {
+    loginAddress: env(
+        'ENT_BOT_LOGIN_ADDRESS',
+        isTcMode
+            ? env('LAUNCHER_TC_LOGIN_SERVER_ADDRESS', 'testcenter.swg-starforge.com')
+            : env('LAUNCHER_LOGIN_SERVER_ADDRESS', 'login.swg-starforge.com')
+    ),
+    loginPort: envInt(
+        'ENT_BOT_LOGIN_PORT',
+        isTcMode
+            ? envInt('LAUNCHER_TC_LOGIN_SERVER_PORT', 44453)
+            : envInt('LAUNCHER_LOGIN_SERVER_PORT', 44553)
+    ),
+    username: env('ENT_BOT_USERNAME'),
+    password: env('ENT_BOT_PASSWORD'),
+    character: env('ENT_BOT_CHARACTER'),
+    chatRoom: env('ENT_BOT_ROOM', 'General'),
+    performanceType: env('ENT_BOT_PERFORMANCE_TYPE', 'dance'),
+    performanceCommand: env('ENT_BOT_PERFORMANCE_COMMAND'),
+    performanceCommands: envJson('ENT_BOT_PERFORMANCE_COMMANDS', []),
+    startupCommands: envJson('ENT_BOT_STARTUP_COMMANDS', []),
+    petAutoCallEnabled: envBool('ENT_BOT_PET_AUTO_CALL_ENABLED', false),
+    petAutoGroupEnabled: envBool('ENT_BOT_PET_AUTO_GROUP_ENABLED', false),
+    petAutoGroupCommand: env('ENT_BOT_PET_AUTO_GROUP_COMMAND', '/tellpet group'),
+    petDiscoveryEnabled: envBool('ENT_BOT_PET_DISCOVERY_ENABLED', true),
+    petDiscoveryDebug: envBool('ENT_BOT_PET_DISCOVERY_DEBUG', false),
+    petControlDeviceIds: normalizeUnsignedIdArray(env('ENT_BOT_PET_CONTROL_DEVICE_IDS', '')),
+    petCallRadialId: normalizeByte(env('ENT_BOT_PET_CALL_RADIAL_ID', '44'), 44),
+    petCallPauseMs: envInt('ENT_BOT_PET_CALL_PAUSE_MS', 3000),
+    petAutoGroupDelayMs: envInt('ENT_BOT_PET_AUTO_GROUP_DELAY_MS', 3000),
+    danceCommand: env('ENT_BOT_DANCE_COMMAND', '/startdance'),
+    musicCommand: env('ENT_BOT_MUSIC_COMMAND', '/startmusic'),
+    flourishCommand: env('ENT_BOT_FLOURISH_COMMAND', '/flourish'),
+    startupCommandPauseMs: envInt('ENT_BOT_STARTUP_COMMAND_PAUSE_MS', 3000),
+    startupDelayMs: envInt('ENT_BOT_STARTUP_DELAY_MS', 2500),
+    intervalMs: envInt('ENT_BOT_INTERVAL_MS', 3000),
+    announceCommands: envBool('ENT_BOT_ANNOUNCE_COMMANDS', true),
+    autoInviteOnTell: envBool('ENT_BOT_AUTO_INVITE_ON_TELL', false),
+    advertsEnabled: envBool('ENT_BOT_ADVERTS_ENABLED', false),
+    advertIntervalMs: envInt('ENT_BOT_ADVERT_INTERVAL_MS', 120000),
+    advertChannels: normalizeStringArray(env('ENT_BOT_ADVERT_CHANNELS', 'spatialChat,planetSay')),
+    advertMessages: resolveAdvertMessages(
+        envJson('ENT_BOT_ADVERT_MESSAGES', []),
+        [
+            env(
+                'ENT_BOT_ADVERT_MESSAGE',
+                env(
+                    'ENT_BOT_ADVERT_MESSAGE_1',
+                    'Buff service available in Mos Eisley Cantina. Come get your entertainer buffs.'
+                )
+            ),
+            env('ENT_BOT_ADVERT_MESSAGE_2', '')
+        ]
+    ),
+    connectionTimeoutMs: envInt('ENT_BOT_CONNECTION_TIMEOUT_MS', 10000),
+    failureThreshold: envInt('ENT_BOT_FAILURE_THRESHOLD', 3),
+    reconnectBaseDelayMs: envInt('ENT_BOT_RECONNECT_BASE_DELAY_MS', 5000),
+    reconnectMaxDelayMs: envInt('ENT_BOT_RECONNECT_MAX_DELAY_MS', 60000),
+    reconnectJitterMs: envInt('ENT_BOT_RECONNECT_JITTER_MS', 1500),
+    reconnectStableResetMs: envInt('ENT_BOT_RECONNECT_STABLE_RESET_MS', 300000),
+    verboseSwgLogging: envBool('ENT_BOT_VERBOSE_SWG_LOGGING', false)
+};
+
+const configuredEntertainers = envJson('ENT_BOT_ENTERTAINERS', []);
+const entertainers = Array.isArray(configuredEntertainers) && configuredEntertainers.length > 0
+    ? configuredEntertainers.map((entertainer) => buildEntertainerSettings(baseEntBotSettings, entertainer))
+    : [buildEntertainerSettings(baseEntBotSettings)];
 
 module.exports = {
     mode: isTcMode ? 'tc' : 'live',
@@ -167,50 +463,9 @@ module.exports = {
 
     entBot: {
         enabled: entBotEnabled,
-        loginAddress: env(
-            'ENT_BOT_LOGIN_ADDRESS',
-            isTcMode
-                ? env('LAUNCHER_TC_LOGIN_SERVER_ADDRESS', 'testcenter.swg-starforge.com')
-                : env('LAUNCHER_LOGIN_SERVER_ADDRESS', 'login.swg-starforge.com')
-        ),
-        loginPort: envInt(
-            'ENT_BOT_LOGIN_PORT',
-            isTcMode
-                ? envInt('LAUNCHER_TC_LOGIN_SERVER_PORT', 44453)
-                : envInt('LAUNCHER_LOGIN_SERVER_PORT', 44553)
-        ),
-        username: env('ENT_BOT_USERNAME'),
-        password: env('ENT_BOT_PASSWORD'),
-        character: env('ENT_BOT_CHARACTER'),
-        chatRoom: env('ENT_BOT_ROOM', 'General'),
-        danceCommand: env('ENT_BOT_DANCE_COMMAND', '/startdance'),
-        flourishCommand: env('ENT_BOT_FLOURISH_COMMAND', '/flourish'),
-        announceCommands: envBool('ENT_BOT_ANNOUNCE_COMMANDS', true),
-        autoInviteOnTell: envBool('ENT_BOT_AUTO_INVITE_ON_TELL', false),
-        advertsEnabled: envBool('ENT_BOT_ADVERTS_ENABLED', false),
-        advertIntervalMs: envInt('ENT_BOT_ADVERT_INTERVAL_MS', 120000),
-        advertChannels: env('ENT_BOT_ADVERT_CHANNELS', 'spatialChat,planetSay')
-            .split(',')
-            .map((value) => String(value || '').trim())
-            .filter(Boolean),
-        advertMessages: [
-            env(
-                'ENT_BOT_ADVERT_MESSAGE_1',
-                'Buff service available in Mos Eisley Cantina. Come get your entertainer buffs.'
-            ),
-            env(
-                'ENT_BOT_ADVERT_MESSAGE_2',
-                'Welcome to Starforge. Thanks for playing, and enjoy your stay in the galaxy.'
-            )
-        ].map((value) => String(value || '').trim()).filter(Boolean),
-        intervalMs: envInt('ENT_BOT_INTERVAL_MS', 3000),
-        connectionTimeoutMs: envInt('ENT_BOT_CONNECTION_TIMEOUT_MS', 10000),
-        failureThreshold: envInt('ENT_BOT_FAILURE_THRESHOLD', 3),
-        reconnectBaseDelayMs: envInt('ENT_BOT_RECONNECT_BASE_DELAY_MS', 5000),
-        reconnectMaxDelayMs: envInt('ENT_BOT_RECONNECT_MAX_DELAY_MS', 60000),
-        reconnectJitterMs: envInt('ENT_BOT_RECONNECT_JITTER_MS', 1500),
-        reconnectStableResetMs: envInt('ENT_BOT_RECONNECT_STABLE_RESET_MS', 300000),
-        verboseSwgLogging: envBool('ENT_BOT_VERBOSE_SWG_LOGGING', false)
+        ...baseEntBotSettings,
+        entertainers,
+        bandEnabled: entertainers.length > 1
     },
 
     db: {
