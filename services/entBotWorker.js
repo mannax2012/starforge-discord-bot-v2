@@ -121,6 +121,11 @@ function createRunner(settings, index) {
     let advertIndex = 0;
     let runnerStarted = false;
     let startupSequenceId = 0;
+    const trackedDiscoveryObjectIds = new Set(
+        petControlDeviceIds
+            .map((objectId) => String(objectId || '').trim())
+            .filter(Boolean)
+    );
 
     function cancelStartupSequence() {
         startupSequenceId += 1;
@@ -145,6 +150,74 @@ function createRunner(settings, index) {
 
         clearInterval(advertTimer);
         advertTimer = null;
+    }
+
+    function rememberDiscoveryObjectId(objectId) {
+        const normalized = String(objectId || '').trim();
+        if (!normalized) {
+            return;
+        }
+
+        trackedDiscoveryObjectIds.add(normalized);
+    }
+
+    function isKnownDiscoveryObjectId(objectId) {
+        const normalized = String(objectId || '').trim();
+        return normalized ? trackedDiscoveryObjectIds.has(normalized) : false;
+    }
+
+    function looksPetRelatedText(...values) {
+        const searchText = values
+            .flatMap((value) => Array.isArray(value) ? value : [value])
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+
+        if (!searchText) {
+            return false;
+        }
+
+        return /(?:^|[\s|/_-])(datapad|pcd|pet|droid|control\s*device|helper|astromech|at_st|creature_names|mob\/creature_names)(?:$|[\s|/_-])/.test(searchText);
+    }
+
+    function shouldLogDiscoveryDebugEvent(event) {
+        if (!event) {
+            return false;
+        }
+
+        const objectId = String(event.objectId || '').trim();
+        const parentId = String(event.parentId || '').trim();
+
+        if (objectId && isKnownDiscoveryObjectId(objectId)) {
+            return true;
+        }
+
+        if (parentId && isKnownDiscoveryObjectId(parentId)) {
+            if (objectId) {
+                rememberDiscoveryObjectId(objectId);
+            }
+            return true;
+        }
+
+        if (looksPetRelatedText(
+            event.objectType,
+            event.stfFile,
+            event.stfName,
+            event.customName,
+            event.parentLabel,
+            event.hints
+        )) {
+            if (objectId) {
+                rememberDiscoveryObjectId(objectId);
+            }
+            if (parentId) {
+                rememberDiscoveryObjectId(parentId);
+            }
+            return true;
+        }
+
+        return false;
     }
 
     function sendPerformanceCommands() {
@@ -367,6 +440,9 @@ function createRunner(settings, index) {
                 return;
             }
 
+            rememberDiscoveryObjectId(device.objectId);
+            rememberDiscoveryObjectId(device.parentId);
+
             const name = device.label || device.stfFile || 'unknown';
 
             console.log(
@@ -379,6 +455,10 @@ function createRunner(settings, index) {
 
         swgChatClient.discoveryDebug = function (event) {
             if (!petDiscoveryDebug || !event) {
+                return;
+            }
+
+            if (!shouldLogDiscoveryDebugEvent(event)) {
                 return;
             }
 
