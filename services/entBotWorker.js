@@ -178,7 +178,7 @@ function createRunner(settings, index) {
             return false;
         }
 
-        return /(?:^|[\s|/_-])(datapad|pcd|pet|droid|control\s*device|helper|astromech|at_st|creature_names|mob\/creature_names)(?:$|[\s|/_-])/.test(searchText);
+        return /(?:^|[\s|/_-])(datapad|pcd|pet_control_device|control\s*device|helper|astromech|at_st)(?:$|[\s|/_-])/.test(searchText);
     }
 
     function shouldLogDiscoveryDebugEvent(event) {
@@ -198,6 +198,21 @@ function createRunner(settings, index) {
                 rememberDiscoveryObjectId(objectId);
             }
             return true;
+        }
+
+        if (event.type === 'containment') {
+            return false;
+        }
+
+        if (event.type === 'sceneCreate') {
+            return false;
+        }
+
+        if (event.type === 'baseline') {
+            const objectType = String(event.objectType || '').trim().toUpperCase();
+            if (objectType && objectType !== 'ITNO' && objectType !== 'ONTI') {
+                return false;
+            }
         }
 
         if (looksPetRelatedText(
