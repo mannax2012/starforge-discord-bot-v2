@@ -494,6 +494,40 @@ DecodeSWGPacket[0x3c565ced] = function(data) {
     return {type:"ChatInstantMessageToClient", PlayerName: AString(data), Message: UString(data)};
 }
 
+DecodeSWGPacket[0x68a75f0c] = function(data) {
+    data.off = 0;
+
+    const objectId = data.readBigUInt64LE(data.off).toString();
+    data.off += 8;
+
+    const objectType = parseObjectType(data.subarray(data.off, data.off + 4));
+    data.off += 4;
+
+    const viewType = data.readUInt8(data.off);
+    data.off += 1;
+
+    const dataSize = data.readUInt32LE(data.off);
+    data.off += 4;
+
+    const payload = data.subarray(data.off, data.off + dataSize);
+    const baseline = {
+        type: "BaselinesMessage",
+        ObjectID: objectId,
+        ObjectType: objectType,
+        ViewType: viewType,
+        DataSize: dataSize,
+        PayloadHex: payload.toString("hex")
+    };
+
+    if (objectType === "ITNO" && viewType === 3) {
+        baseline.ParsedBaseline = parseItno03Baseline(payload);
+    }
+
+    baseline.PayloadHints = extractStringHints(payload);
+
+    return baseline;
+}
+
 DecodeSWGPacket[0xcd4ce444] = function(data) {
     var ret = {type: "ChatRoomMessage"};
     data.off = 0;
@@ -556,12 +590,20 @@ EncodeSWGPacket["CommandQueueEnqueue"] = function(data) {
 }
 
 EncodeSWGPacket["ObjectMenuSelectMessage::MESSAGE_TYPE"] = function(data) {
-    const body = Buffer.alloc(9);
+    const objectId = data && data.ObjectID !== undefined && data.ObjectID !== null
+        ? BigInt(data.ObjectID)
+        : null;
+    const radialId = Math.max(0, Math.min(255, Number((data && data.RadialID) || 0)));
 
-    body.writeBigUInt64LE(BigInt((data && data.ObjectID) || 0), 0);
-    body.writeUInt8(Number((data && data.RadialID) || (data && data.MessageType) || 0) & 0xff, 8);
+    if (objectId === null) {
+        return false;
+    }
 
-    return Encrypt(Buffer.concat([EncodeSOEHeader(0x7ca18726, 3), body]));
+    const payload = Buffer.alloc(9);
+    payload.writeBigUInt64LE(objectId, 0);
+    payload.writeUInt8(radialId, 8);
+
+    return Encrypt(Buffer.concat([EncodeSOEHeader(0x7ca18726, 3), payload]));
 }
 
 DecodeSWGPacket[0xbc6bddf2] = function(data) {
@@ -724,6 +766,51 @@ DecodeSWGPacket[0x80ce5e46] = function() {
 }
 */
 
+DecodeSWGPacket[0xfe89ddea] = function(data) {
+    data.off = 0;
+
+    const packet = {
+        type: "SceneCreateObjectByCrc",
+        ObjectID: data.readBigUInt64LE(data.off).toString()
+    };
+    data.off += 8;
+
+    packet.QuaternionX = data.readFloatLE(data.off);
+    packet.QuaternionY = data.readFloatLE(data.off + 4);
+    packet.QuaternionZ = data.readFloatLE(data.off + 8);
+    packet.QuaternionW = data.readFloatLE(data.off + 12);
+    data.off += 16;
+
+    packet.PositionX = data.readFloatLE(data.off);
+    packet.PositionY = data.readFloatLE(data.off + 4);
+    packet.PositionZ = data.readFloatLE(data.off + 8);
+    data.off += 12;
+
+    packet.ObjectCRC = data.readUInt32LE(data.off);
+    data.off += 4;
+
+    packet.ByteFlag = data.readUInt8(data.off);
+
+    return packet;
+}
+
+DecodeSWGPacket[0x56cbde9e] = function(data) {
+    data.off = 0;
+    return {
+        type: "UpdateContainmentMessage",
+        ObjectID: data.readBigUInt64LE(data.off).toString(),
+        ParentID: data.readBigUInt64LE(data.off + 8).toString(),
+        ArrangementID: data.readInt32LE(data.off + 16)
+    };
+}
+
+DecodeSWGPacket[0x4d45d504] = function(data) {
+    return {
+        type: "SceneDestroyObject",
+        ObjectID: data.readBigUInt64LE(0).toString()
+    };
+}
+
 DecodeSWGPacket[0xf898e25f] = function(data) {
     data.off = 0;
     return {type:"RequestCategories", Language: AString(data)}
@@ -835,6 +922,74 @@ function writeUString(buf, str) {
     buf.writeUInt32LE(str.length, buf.off);
     buf.write(str, buf.off+4, str.length*2, "utf16le");
     buf.off += 4 + str.length*2;
+}
+
+function parseObjectType(buf) {
+    return Buffer.from(buf)
+        .reverse()
+        .toString("ascii");
+}
+
+function parseItno03Baseline(payload) {
+    if (!Buffer.isBuffer(payload) || payload.length < 2) {
+        return null;
+    }
+
+    payload.off = 0;
+
+    const objectOperandCount = payload.readUInt16LE(payload.off);
+    payload.off += 2;
+
+    const complexity = payload.readFloatLE(payload.off);
+    payload.off += 4;
+
+    const stfFile = AString(payload);
+    const stfSpacer = payload.readInt32LE(payload.off);
+    payload.off += 4;
+
+    const stfName = AString(payload);
+    const customName = UString(payload);
+    const volume = payload.readInt32LE(payload.off);
+    payload.off += 4;
+
+    const genericInt = payload.readInt32LE(payload.off);
+
+    return {
+        objectOperandCount,
+        complexity,
+        stfFile,
+        stfSpacer,
+        stfName,
+        customName,
+        volume,
+        genericInt
+    };
+}
+
+function extractStringHints(payload) {
+    if (!Buffer.isBuffer(payload) || payload.length === 0) {
+        return [];
+    }
+
+    const hints = new Set();
+
+    const asciiMatches = payload.toString("ascii").match(/[A-Za-z0-9_\/.-]{4,}/g) || [];
+    for (const match of asciiMatches) {
+        if (/[A-Za-z]/.test(match)) {
+            hints.add(match);
+        }
+    }
+
+    const utf16Matches = payload
+        .toString("utf16le")
+        .match(/[A-Za-z0-9_\/.-]{4,}/g) || [];
+    for (const match of utf16Matches) {
+        if (/[A-Za-z]/.test(match)) {
+            hints.add(match);
+        }
+    }
+
+    return Array.from(hints).slice(0, 20);
 }
 
 function GenerateCrc(pData, nCrcSeed)
