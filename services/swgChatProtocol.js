@@ -226,6 +226,25 @@ function Encrypt(bufData) {
     return encrypted;
 }
 
+function extractReadableText(data) {
+    if (!Buffer.isBuffer(data) || data.length === 0) {
+        return '';
+    }
+
+    function normalizeReadableText(value) {
+        return String(value || '')
+            .replace(/\u0000/g, ' ')
+            .replace(/[^\x20-\x7E]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    const utf16Text = normalizeReadableText(data.toString('utf16le'));
+    const asciiText = normalizeReadableText(data.toString('latin1'));
+
+    return utf16Text.length >= asciiText.length ? utf16Text : asciiText;
+}
+
 function EncodeSOEHeader(opcode, operands) {
     var buf = Buffer.alloc(10);
     buf.writeUInt16BE(9, 0);
@@ -492,6 +511,14 @@ DecodeSWGPacket[0x3c565ced] = function(data) {
     AString(data);//SWG
     AString(data);//server
     return {type:"ChatInstantMessageToClient", PlayerName: AString(data), Message: UString(data)};
+}
+
+DecodeSWGPacket[0x6d2a6413] = function(data) {
+    return {
+        type: "ChatSystemMessage",
+        Message: extractReadableText(data),
+        PayloadHex: data.toString('hex')
+    };
 }
 
 DecodeSWGPacket[0x68a75f0c] = function(data) {

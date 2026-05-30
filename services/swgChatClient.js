@@ -49,6 +49,7 @@ function createSwgChatClient() {
         serverUp() {},
         reconnected() {},
         recvTell(from, message) {},
+        recvSystemMessage(message, packet) {},
         controlDeviceDiscovered(device) {},
         discoveryDebug(message) {},
         login(cfg) {
@@ -310,6 +311,9 @@ function createSwgChatClient() {
     };
     handlePacket.ChatInstantMessageToClient = function (packet) {
         client.recvTell(packet.PlayerName, packet.Message);
+    };
+    handlePacket.ChatSystemMessage = function (packet) {
+        client.recvSystemMessage(packet.Message, packet);
     };
     handlePacket.SceneCreateObjectByCrc = function (packet) {
         upsertDiscoveredObject(packet.ObjectID, {

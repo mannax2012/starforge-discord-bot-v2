@@ -99,15 +99,55 @@ function executeBotCommand(client, command) {
     return client.sendConsoleCommand(normalized);
 }
 
+function normalizeCommandList(commands) {
+    if (!Array.isArray(commands)) {
+        return [];
+    }
+
+    return commands
+        .map((command) => String(command || '').trim())
+        .filter(Boolean);
+}
+
+function extractGroupInviteSender(message) {
+    const normalizedMessage = String(message || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (!normalizedMessage) {
+        return '';
+    }
+
+    const patterns = [
+        /\b([A-Za-z0-9'_-]+)\b has invited you to join (?:a |their |his |her )?group\b/i,
+        /\bgroup invitation from ([A-Za-z0-9'_-]+)\b/i,
+        /\byou have been invited to join (?:a |their |his |her )?group by ([A-Za-z0-9'_-]+)\b/i,
+        /\b([A-Za-z0-9'_-]+)\b invited you to join (?:a |their |his |her )?group\b/i
+    ];
+
+    for (const pattern of patterns) {
+        const match = normalizedMessage.match(pattern);
+        if (match && match[1]) {
+            return match[1].trim();
+        }
+    }
+
+    return '';
+}
+
 function createRunner(settings, index) {
     const swgChatClient = createSwgChatClient();
     const label = getRunnerLabel(settings, index);
     const performanceCommands = summarizeCommands(settings);
     const startupCommands = summarizeStartupCommands(settings);
+    const inviteCleanupCommands = normalizeCommandList(settings.inviteCleanupCommands);
     const advertMessages = summarizeAdvertMessages(settings);
     const petAutoCallEnabled = Boolean(settings.petAutoCallEnabled);
     const petAutoGroupEnabled = Boolean(settings.petAutoGroupEnabled);
     const petAutoGroupCommand = String(settings.petAutoGroupCommand || '').trim();
+    const autoAcceptGroupInvites = Boolean(settings.autoAcceptGroupInvites);
+    const groupInviteAcceptCommand = String(settings.groupInviteAcceptCommand || '').trim();
+    const groupInviteResponsePauseMs = Math.max(0, Number(settings.groupInviteResponsePauseMs || 500));
     const petDiscoveryEnabled = settings.petDiscoveryEnabled !== false;
     const petDiscoveryDebug = Boolean(settings.petDiscoveryDebug);
     const petControlDeviceIds = Array.isArray(settings.petControlDeviceIds) ? settings.petControlDeviceIds : [];
@@ -115,12 +155,15 @@ function createRunner(settings, index) {
     const petCallPauseMs = Math.max(0, Number(settings.petCallPauseMs || 3000));
     const petAutoGroupDelayMs = Math.max(0, Number(settings.petAutoGroupDelayMs || petCallPauseMs || 3000));
     const startupCommandPauseMs = Math.max(0, Number(settings.startupCommandPauseMs || 3000));
+    const inviteCleanupPauseMs = Math.max(0, Number(settings.inviteCleanupPauseMs || 750));
     let startupTimer = null;
     let performanceTimer = null;
     let advertTimer = null;
     let advertIndex = 0;
     let runnerStarted = false;
     let startupSequenceId = 0;
+    let lastAcceptedInviteSignature = '';
+    let lastAcceptedInviteAt = 0;
     const trackedDiscoveryObjectIds = new Set(
         petControlDeviceIds
             .map((objectId) => String(objectId || '').trim())
@@ -245,30 +288,43 @@ function createRunner(settings, index) {
         return sentAny;
     }
 
-    async function sendStartupCommands(sequenceId) {
+    async function sendCommandSequence(commands, sequenceId, pauseMs = 0) {
         let sentAny = false;
+        const normalizedCommands = normalizeCommandList(commands);
 
-        for (let idx = 0; idx < startupCommands.length; idx += 1) {
+        for (let idx = 0; idx < normalizedCommands.length; idx += 1) {
             if (sequenceId !== startupSequenceId) {
                 return sentAny;
             }
 
-            const command = startupCommands[idx];
+            const command = normalizedCommands[idx];
             if (isUiActionCommand(command)) {
                 console.warn(
-                    `${label} Skipping unsupported client UI command in startupCommands: ${command}`
+                    `${label} Skipping unsupported client UI command in startup sequence: ${command}`
                 );
                 continue;
             }
 
             sentAny = executeBotCommand(swgChatClient, command) || sentAny;
 
-            if (idx < startupCommands.length - 1 && startupCommandPauseMs > 0) {
-                await wait(startupCommandPauseMs);
+            if (idx < normalizedCommands.length - 1 && pauseMs > 0) {
+                await wait(pauseMs);
             }
         }
 
         return sentAny;
+    }
+
+    async function sendPerformanceResetCommands(sequenceId) {
+        return sendCommandSequence(['/stopdance', '/stopmusic'], sequenceId, 500);
+    }
+
+    async function sendStartupCommands(sequenceId) {
+        return sendCommandSequence(startupCommands, sequenceId, startupCommandPauseMs);
+    }
+
+    async function sendInviteCleanupCommands(sequenceId) {
+        return sendCommandSequence(inviteCleanupCommands, sequenceId, inviteCleanupPauseMs);
     }
 
     async function sendPetControlDeviceCalls(sequenceId) {
@@ -327,6 +383,25 @@ function createRunner(settings, index) {
     }
 
     async function runStartupSequence(sequenceId) {
+        console.log(`${label} Resetting active performance state [commands=/stopdance | /stopmusic]`);
+        await sendPerformanceResetCommands(sequenceId);
+
+        if (sequenceId !== startupSequenceId) {
+            return;
+        }
+
+        if (inviteCleanupCommands.length > 0) {
+            console.log(
+                `${label} Invite cleanup started [commands=${inviteCleanupCommands.join(' | ')}] `
+                + `[pauseMs=${inviteCleanupPauseMs}]`
+            );
+            await sendInviteCleanupCommands(sequenceId);
+        }
+
+        if (sequenceId !== startupSequenceId) {
+            return;
+        }
+
         if (petDiscoveryEnabled) {
             const discoveredDevices = swgChatClient.getDiscoveredControlDevices();
             if (discoveredDevices.length > 0) {
@@ -519,6 +594,58 @@ function createRunner(settings, index) {
             executeBotCommand(swgChatClient, `/invite ${sender}`);
         };
 
+        swgChatClient.recvSystemMessage = function (message, packet) {
+            const normalizedMessage = String(message || '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            if (!normalizedMessage) {
+                return;
+            }
+
+            const sender = extractGroupInviteSender(normalizedMessage);
+            if (!sender) {
+                return;
+            }
+
+            console.log(`${label} Group invite detected [from=${sender}] [message=${normalizedMessage}]`);
+
+            if (!autoAcceptGroupInvites) {
+                return;
+            }
+
+            if (!groupInviteAcceptCommand) {
+                console.warn(`${label} Group invite accept skipped because no accept command is configured.`);
+                return;
+            }
+
+            const signature = `${sender.toLowerCase()}|${normalizedMessage.toLowerCase()}`;
+            const now = Date.now();
+            if (signature === lastAcceptedInviteSignature && (now - lastAcceptedInviteAt) < 15000) {
+                console.log(`${label} Duplicate group invite message ignored [from=${sender}]`);
+                return;
+            }
+
+            lastAcceptedInviteSignature = signature;
+            lastAcceptedInviteAt = now;
+
+            setTimeout(() => {
+                if (!runnerStarted || !swgChatClient.isConnected) {
+                    return;
+                }
+
+                console.log(
+                    `${label} Accepting group invite [from=${sender}] `
+                    + `[command=${groupInviteAcceptCommand}]`
+                );
+                executeBotCommand(swgChatClient, groupInviteAcceptCommand);
+            }, groupInviteResponsePauseMs);
+
+            if (packet && packet.PayloadHex && settings.verboseSwgLogging) {
+                console.log(`${label} Group invite payload [hex=${packet.PayloadHex}]`);
+            }
+        };
+
         swgChatClient.serverDown = function () {
             console.warn(`${label} Lost contact with the SWG server.`);
         };
@@ -579,10 +706,12 @@ function createRunner(settings, index) {
                 `${label} Starting [type=${settings.performanceType}] [intervalMs=${settings.intervalMs || 3000}] `
                 + `[performanceCommands=${performanceCommands.join(' | ') || 'none'}] `
                 + `[startupCommands=${startupCommands.join(' | ') || 'none'}] `
+                + `[inviteCleanupCommands=${inviteCleanupCommands.join(' | ') || 'none'}] `
                 + `[petDiscovery=${petDiscoveryEnabled}] `
                 + `[petDiscoveryDebug=${petDiscoveryDebug}] `
                 + `[petAutoCall=${petAutoCallEnabled}] `
                 + `[petAutoGroup=${petAutoGroupEnabled}] `
+                + `[autoAcceptGroupInvites=${autoAcceptGroupInvites}] `
                 + `[petControlDeviceIds=${petControlDeviceIds.join(' | ') || 'none'}] `
                 + `[petCallRadialId=${petCallRadialId}]`
             );
