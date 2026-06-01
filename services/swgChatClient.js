@@ -14,6 +14,21 @@ const KNOWN_COMMANDS = {
     startdance: {
         commandCrc: 0x7B1DCBE0
     },
+    startmusic: {
+        commandCrc: 0xDDD1E8F1
+    },
+    stopdance: {
+        commandCrc: 0xECC171CC
+    },
+    stopmusic: {
+        commandCrc: 0x4A0D52DD
+    },
+    join: {
+        commandCrc: 0xA99E6807
+    },
+    leavegroup: {
+        commandCrc: 0x5061D654
+    },
     tellpet: {
         commandCrc: 0xBD7DF918
     },

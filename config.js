@@ -257,13 +257,15 @@ function buildEntertainerSettings(baseSettings, overrides = {}) {
 
 const botMode = String(env('BOT_MODE', 'live')).trim().toLowerCase();
 const isTcMode = botMode === 'tc' || botMode === 'testcenter';
-const isLiveMode = !isTcMode;
+const isDevMode = botMode === 'dev' || botMode === 'development';
+const isLiveMode = !isTcMode && !isDevMode;
+const usesLiveDefaults = !isTcMode;
 
-const discordEnabled = envBool('DISCORD_ENABLED', isLiveMode);
-const reviewPostsEnabled = envBool('DISCORD_REVIEW_POSTS_ENABLED', isLiveMode);
-const commandsEnabled = envBool('DISCORD_COMMANDS_ENABLED', isLiveMode);
-const welcomeEnabled = envBool('DISCORD_WELCOME_ENABLED', isLiveMode);
-const botLogEnabled = envBool('DISCORD_BOT_LOG_ENABLED', isLiveMode);
+const discordEnabled = envBool('DISCORD_ENABLED', usesLiveDefaults);
+const reviewPostsEnabled = envBool('DISCORD_REVIEW_POSTS_ENABLED', usesLiveDefaults);
+const commandsEnabled = envBool('DISCORD_COMMANDS_ENABLED', usesLiveDefaults);
+const welcomeEnabled = envBool('DISCORD_WELCOME_ENABLED', usesLiveDefaults);
+const botLogEnabled = envBool('DISCORD_BOT_LOG_ENABLED', usesLiveDefaults);
 const webApiEnabled = envBool('WEB_LISTENER_ENABLED', true);
 const statusEnabled = envBool('STATUS_MONITOR_ENABLED', true);
 const swgChatEnabled = envBool('SWG_CHAT_ENABLED', false);
@@ -290,7 +292,7 @@ const baseEntBotSettings = {
     performanceCommand: env('ENT_BOT_PERFORMANCE_COMMAND'),
     performanceCommands: envJson('ENT_BOT_PERFORMANCE_COMMANDS', []),
     startupCommands: envJson('ENT_BOT_STARTUP_COMMANDS', []),
-    inviteCleanupCommands: envJson('ENT_BOT_INVITE_CLEANUP_COMMANDS', ['/decline', '/disband']),
+    inviteCleanupCommands: envJson('ENT_BOT_INVITE_CLEANUP_COMMANDS', ['/leavegroup']),
     petAutoCallEnabled: envBool('ENT_BOT_PET_AUTO_CALL_ENABLED', false),
     petAutoGroupEnabled: envBool('ENT_BOT_PET_AUTO_GROUP_ENABLED', false),
     petAutoGroupCommand: env('ENT_BOT_PET_AUTO_GROUP_COMMAND', '/tellpet group'),
@@ -343,8 +345,9 @@ const entertainers = Array.isArray(configuredEntertainers) && configuredEntertai
     : [buildEntertainerSettings(baseEntBotSettings)];
 
 module.exports = {
-    mode: isTcMode ? 'tc' : 'live',
+    mode: isTcMode ? 'tc' : (isDevMode ? 'dev' : 'live'),
     isLiveMode,
+    isDevMode,
     isTcMode,
 
     features: {
@@ -379,6 +382,14 @@ module.exports = {
         sharedSecret: env('WEBHOOK_SHARED_SECRET')
     },
 
+    core3Control: {
+        enabled: envBool('CORE3_CONTROL_ENABLED', false),
+        wslCommand: env('CORE3_CONTROL_WSL_COMMAND', 'wsl.exe'),
+        wslRepoPath: env('CORE3_CONTROL_WSL_REPO_PATH', '/home/mannax/SWG-JTL/Starforge-JTL/MMOCoreORB'),
+        scriptPath: env('CORE3_CONTROL_SCRIPT_PATH', 'bin/core3-control.sh'),
+        timeoutMs: envInt('CORE3_CONTROL_TIMEOUT_MS', 120000)
+    },
+
     launcher: {
         launcherGameSessionMinutes: envInt('LAUNCHER_GAME_SESSION_MINUTES', 5),
 
@@ -406,7 +417,7 @@ module.exports = {
     },
 
     accountNotifications: {
-        activationEmailEnabled: envBool('ACTIVATION_EMAIL_ENABLED', isLiveMode),
+        activationEmailEnabled: envBool('ACTIVATION_EMAIL_ENABLED', usesLiveDefaults),
         activationEmailUrl: env('ACTIVATION_EMAIL_URL', ''),
         activationEmailSharedSecret: env('ACTIVATION_EMAIL_SHARED_SECRET', env('WEBHOOK_SHARED_SECRET', '')),
         activationEmailTimeoutMs: envInt('ACTIVATION_EMAIL_TIMEOUT_MS', 10000)

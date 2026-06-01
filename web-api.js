@@ -28,6 +28,7 @@ const {
     setCachedGameSession,
     clearCachedGameSessions
 } = require('./services/launcherGameSessionCache');
+const { runCore3Control } = require('./services/core3ControlService');
 const { formatAttemptedEndpoints, postTcApiJson } = require('./utils/tcApiFetch');
 
 function requireSharedSecret(req, res, next) {
@@ -213,6 +214,14 @@ function buildPatchNotesAnnouncementContent(payload) {
     }
 
     return content;
+}
+
+function buildCore3DisabledResponse(res) {
+    return res.status(503).json({
+        success: false,
+        message: 'Core3 control is disabled.',
+        data: null
+    });
 }
 
 async function postPatchNotesAnnouncement(client, payload) {
@@ -786,6 +795,102 @@ app.post('/api/admin/account-email-lookup', requireSharedSecret, async function 
         });
     }
 });
+
+    app.get('/api/admin/core3/status', requireSharedSecret, async function (req, res) {
+        try {
+            if (!config.core3Control || !config.core3Control.enabled) {
+                return buildCore3DisabledResponse(res);
+            }
+
+            const result = await runCore3Control('status');
+
+            return res.status(result.statusCode || (result.success ? 200 : 500)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error(`[API Admin Core3 Status] ${getErrorMessage(error)}`);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal Core3 status error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/admin/core3/run', requireSharedSecret, async function (req, res) {
+        try {
+            if (!config.core3Control || !config.core3Control.enabled) {
+                return buildCore3DisabledResponse(res);
+            }
+
+            const result = await runCore3Control('run');
+
+            return res.status(result.statusCode || (result.success ? 200 : 500)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error(`[API Admin Core3 Run] ${getErrorMessage(error)}`);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal Core3 run error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/admin/core3/stop', requireSharedSecret, async function (req, res) {
+        try {
+            if (!config.core3Control || !config.core3Control.enabled) {
+                return buildCore3DisabledResponse(res);
+            }
+
+            const result = await runCore3Control('stop');
+
+            return res.status(result.statusCode || (result.success ? 200 : 500)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error(`[API Admin Core3 Stop] ${getErrorMessage(error)}`);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal Core3 stop error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/admin/core3/capture-crash', requireSharedSecret, async function (req, res) {
+        try {
+            if (!config.core3Control || !config.core3Control.enabled) {
+                return buildCore3DisabledResponse(res);
+            }
+
+            const result = await runCore3Control('capture-crash');
+
+            return res.status(result.statusCode || (result.success ? 200 : 500)).json({
+                success: result.success,
+                message: result.message,
+                data: result.data || null
+            });
+        } catch (error) {
+            console.error(`[API Admin Core3 Capture Crash] ${getErrorMessage(error)}`);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal Core3 capture error.',
+                data: null
+            });
+        }
+    });
 
     app.get('/api/status/current', requireSharedSecret, function (req, res) {
         try {

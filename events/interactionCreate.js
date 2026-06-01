@@ -1,16 +1,16 @@
 const { Events } = require('discord.js');
-const config = require('../config');
 const { activateAccountByUsername } = require('../services/accountService');
+const {
+    buildCore3AdminPanel,
+    executeCore3AdminPanelAction,
+    getActionLabel,
+    parseCore3AdminPanelCustomId
+} = require('../services/core3AdminPanelService');
 const { logToBotChannel } = require('../services/logging');
+const { userHasAdminRole } = require('../utils/roleCheck');
 
 function hasActivationPermission(member) {
-    const adminRoleName = config.adminRoleName || 'Starforge Admin';
-
-    if (!member || !member.roles || !member.roles.cache) {
-        return false;
-    }
-
-    return member.roles.cache.some(role => role.name === adminRoleName);
+    return userHasAdminRole(member);
 }
 
 function formatActivationEmailStatus(data) {
@@ -37,10 +37,81 @@ function formatActivationEmailStatus(data) {
     return data.activationEmailMessage || 'Activation email was skipped.';
 }
 
+function formatPanelTimestamp() {
+    return new Date().toLocaleString('en-US', {
+        timeZone: 'America/Chicago',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+}
+
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
         if (!interaction.isButton()) {
+            return;
+        }
+
+        const core3PanelData = parseCore3AdminPanelCustomId(interaction.customId);
+        if (core3PanelData) {
+            const { ownerId, action } = core3PanelData;
+
+            if (interaction.user.id !== ownerId) {
+                await interaction.reply({
+                    content: 'This admin panel belongs to a different user.',
+                    ephemeral: true
+                });
+                return;
+            }
+
+            const actionLabel = getActionLabel(action);
+
+            await interaction.deferUpdate();
+            await interaction.message.edit(
+                buildCore3AdminPanel(ownerId, interaction.user.tag, {
+                    state: 'working',
+                    label: actionLabel
+                })
+            );
+
+            try {
+                const result = await executeCore3AdminPanelAction(action);
+
+                await interaction.message.edit(
+                    buildCore3AdminPanel(ownerId, interaction.user.tag, {
+                        state: 'done',
+                        success: result.success,
+                        message: result.message,
+                        timestamp: formatPanelTimestamp()
+                    })
+                );
+
+                await logToBotChannel(
+                    client,
+                    `${interaction.user.tag} used the Core3 admin panel: ${actionLabel}. ${result.message}`
+                );
+            } catch (error) {
+                console.error(`[Core3 Admin Panel] ${actionLabel} failed: ${error.message}`);
+
+                await interaction.message.edit(
+                    buildCore3AdminPanel(ownerId, interaction.user.tag, {
+                        state: 'done',
+                        success: false,
+                        message: `${actionLabel} failed: ${error.message}`,
+                        timestamp: formatPanelTimestamp()
+                    })
+                );
+
+                await logToBotChannel(
+                    client,
+                    `${interaction.user.tag} failed to use the Core3 admin panel for ${actionLabel}: ${error.message}`
+                );
+            }
+
             return;
         }
 
