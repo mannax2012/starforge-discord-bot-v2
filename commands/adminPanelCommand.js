@@ -1,3 +1,4 @@
+const config = require('../config');
 const { userHasAdminRole } = require('../utils/roleCheck');
 const { logToBotChannel } = require('../services/logging');
 const {
@@ -10,17 +11,19 @@ module.exports = {
     name: 'adminpanel',
     description: 'Sends the Core3 admin control panel in DM (Admin only).',
     async execute(message, args, client) {
+        const currentBotMode = config && config.isTcMode ? 'tc' : 'live';
+        const requestedMode = normalizePanelMode(args && args[0] ? args[0] : null);
+
+        if (!requestedMode || requestedMode !== currentBotMode) {
+            return;
+        }
+
         if (!message.guild || !message.member) {
             return message.reply('This command can only be used in a server channel.');
         }
 
         if (!userHasAdminRole(message.member)) {
             return message.reply('You do not have permission to use this command.');
-        }
-
-        const requestedMode = normalizePanelMode(args && args[0] ? args[0] : null);
-        if (!requestedMode) {
-            return message.reply('Usage: `!adminpanel live` or `!adminpanel tc`.');
         }
 
         try {
