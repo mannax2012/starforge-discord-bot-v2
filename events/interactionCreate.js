@@ -1,7 +1,15 @@
-const { Events } = require('discord.js');
+const {
+    ActionRowBuilder,
+    Events,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
+} = require('discord.js');
 const { activateAccountByUsername } = require('../services/accountService');
 const {
+    buildButtonCustomId,
     buildCore3AdminPanel,
+    buildCore3StopConfirmPanel,
     executeCore3AdminPanelAction,
     formatModeLabel,
     getActionLabel,
@@ -50,69 +58,200 @@ function formatPanelTimestamp() {
     });
 }
 
+function normalizeShutdownMinutesInput(value) {
+    const raw = String(value == null ? '' : value).trim();
+
+    if (!/^\d+$/.test(raw)) {
+        return {
+            minutes: 15,
+            defaulted: true
+        };
+    }
+
+    const parsed = Number.parseInt(raw, 10);
+
+    if (!Number.isInteger(parsed) || parsed > 60) {
+        return {
+            minutes: 15,
+            defaulted: true
+        };
+    }
+
+    return {
+        minutes: parsed,
+        defaulted: false
+    };
+}
+
+async function executeCore3PanelAction(panelMessage, actorTag, ownerId, mode, action, client, options) {
+    const actionOptions = options || {};
+    const actionLabel = actionOptions.actionLabel || getActionLabel(action, mode);
+
+    await panelMessage.edit(
+        buildCore3AdminPanel(ownerId, actorTag, mode, {
+            state: 'working',
+            label: actionLabel
+        })
+    );
+
+    try {
+        const result = await executeCore3AdminPanelAction(action, mode, actionOptions.executeOptions || {});
+
+        await panelMessage.edit(
+            buildCore3AdminPanel(ownerId, actorTag, mode, {
+                state: 'done',
+                success: result.success,
+                message: result.message,
+                timestamp: formatPanelTimestamp()
+            })
+        );
+
+        await logToBotChannel(
+            client,
+            `${actorTag} used the ${formatModeLabel(mode)} Core3 admin panel: ${actionLabel}. ${result.message}`
+        );
+
+        return result;
+    } catch (error) {
+        console.error(`[Core3 Admin Panel] ${actionLabel} failed: ${error.message}`);
+
+        await panelMessage.edit(
+            buildCore3AdminPanel(ownerId, actorTag, mode, {
+                state: 'done',
+                success: false,
+                message: `${actionLabel} failed: ${error.message}`,
+                timestamp: formatPanelTimestamp()
+            })
+        );
+
+        await logToBotChannel(
+            client,
+            `${actorTag} failed to use the ${formatModeLabel(mode)} Core3 admin panel for ${actionLabel}: ${error.message}`
+        );
+
+        throw error;
+    }
+}
+
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
-        if (!interaction.isButton()) {
-            return;
-        }
+        if (interaction.isButton()) {
+            const core3PanelData = parseCore3AdminPanelCustomId(interaction.customId);
+            if (core3PanelData) {
+                const { ownerId, mode, action } = core3PanelData;
 
-        const core3PanelData = parseCore3AdminPanelCustomId(interaction.customId);
-        if (core3PanelData) {
-            const { ownerId, mode, action } = core3PanelData;
+                if (interaction.user.id !== ownerId) {
+                    await interaction.reply({
+                        content: 'This admin panel belongs to a different user.',
+                        ephemeral: true
+                    });
+                    return;
+                }
 
-            if (interaction.user.id !== ownerId) {
-                await interaction.reply({
-                    content: 'This admin panel belongs to a different user.',
-                    ephemeral: true
-                });
+                if (action === 'stop') {
+                    await interaction.update(
+                        buildCore3StopConfirmPanel(ownerId, interaction.user.tag, mode)
+                    );
+                    return;
+                }
+
+                if (action === 'stop-cancel') {
+                    await interaction.update(
+                        buildCore3AdminPanel(ownerId, interaction.user.tag, mode, {
+                            state: 'done',
+                            success: false,
+                            message: 'Forced stop canceled.',
+                            timestamp: formatPanelTimestamp()
+                        })
+                    );
+                    return;
+                }
+
+                if (action === 'shutdown') {
+                    const modal = new ModalBuilder()
+                        .setCustomId(buildButtonCustomId(ownerId, mode, 'shutdown-submit', interaction.message.id))
+                        .setTitle(`Shutdown ${formatModeLabel(mode)} Core3`);
+                    const minutesInput = new TextInputBuilder()
+                        .setCustomId('shutdown_minutes')
+                        .setLabel('Minutes until shutdown')
+                        .setStyle(TextInputStyle.Short)
+                        .setPlaceholder('0-60, defaults to 15 if invalid or > 60')
+                        .setRequired(false)
+                        .setMaxLength(3);
+                    const row = new ActionRowBuilder().addComponents(minutesInput);
+                    modal.addComponents(row);
+                    await interaction.showModal(modal);
+                    return;
+                }
+
+                const executeAction = action === 'stop-confirm' ? 'stop' : action;
+                const actionLabel = action === 'stop-confirm'
+                    ? `Force Stop ${formatModeLabel(mode)} Core3`
+                    : getActionLabel(executeAction, mode);
+
+                await interaction.deferUpdate();
+                await executeCore3PanelAction(
+                    interaction.message,
+                    interaction.user.tag,
+                    ownerId,
+                    mode,
+                    executeAction,
+                    client,
+                    {
+                        actionLabel
+                    }
+                );
                 return;
             }
+        }
 
-            const actionLabel = getActionLabel(action, mode);
+        if (interaction.isModalSubmit()) {
+            const core3PanelData = parseCore3AdminPanelCustomId(interaction.customId);
+            if (core3PanelData && core3PanelData.action === 'shutdown-submit') {
+                const { ownerId, mode, messageId } = core3PanelData;
 
-            await interaction.deferUpdate();
-            await interaction.message.edit(
-                buildCore3AdminPanel(ownerId, interaction.user.tag, mode, {
-                    state: 'working',
-                    label: actionLabel
-                })
-            );
+                if (interaction.user.id !== ownerId) {
+                    await interaction.reply({
+                        content: 'This admin panel belongs to a different user.',
+                        ephemeral: true
+                    });
+                    return;
+                }
 
-            try {
-                const result = await executeCore3AdminPanelAction(action, mode);
-
-                await interaction.message.edit(
-                    buildCore3AdminPanel(ownerId, interaction.user.tag, mode, {
-                        state: 'done',
-                        success: result.success,
-                        message: result.message,
-                        timestamp: formatPanelTimestamp()
-                    })
+                const normalized = normalizeShutdownMinutesInput(
+                    interaction.fields.getTextInputValue('shutdown_minutes')
                 );
+                const minutesNote = normalized.defaulted
+                    ? `Invalid or too-large input detected, so shutdown will use the default of ${normalized.minutes} minute(s).`
+                    : `Shutdown will use ${normalized.minutes} minute(s).`;
 
-                await logToBotChannel(
+                await interaction.reply({
+                    content: `${formatModeLabel(mode)} Core3 shutdown requested. ${minutesNote}`,
+                    ephemeral: true
+                });
+
+                const panelMessage = await interaction.channel.messages.fetch(messageId);
+
+                void executeCore3PanelAction(
+                    panelMessage,
+                    interaction.user.tag,
+                    ownerId,
+                    mode,
+                    'shutdown',
                     client,
-                    `${interaction.user.tag} used the ${formatModeLabel(mode)} Core3 admin panel: ${actionLabel}. ${result.message}`
+                    {
+                        actionLabel: `Shutdown ${formatModeLabel(mode)} Core3 (${normalized.minutes} minute(s))`,
+                        executeOptions: {
+                            minutes: normalized.minutes
+                        }
+                    }
                 );
-            } catch (error) {
-                console.error(`[Core3 Admin Panel] ${actionLabel} failed: ${error.message}`);
-
-                await interaction.message.edit(
-                    buildCore3AdminPanel(ownerId, interaction.user.tag, mode, {
-                        state: 'done',
-                        success: false,
-                        message: `${actionLabel} failed: ${error.message}`,
-                        timestamp: formatPanelTimestamp()
-                    })
-                );
-
-                await logToBotChannel(
-                    client,
-                    `${interaction.user.tag} failed to use the ${formatModeLabel(mode)} Core3 admin panel for ${actionLabel}: ${error.message}`
-                );
+                return;
             }
+        }
 
+        if (!interaction.isButton()) {
             return;
         }
 

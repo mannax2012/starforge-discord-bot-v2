@@ -224,6 +224,31 @@ function buildCore3DisabledResponse(res) {
     });
 }
 
+function normalizeShutdownMinutesInput(value) {
+    const raw = String(value == null ? '' : value).trim();
+
+    if (!/^\d+$/.test(raw)) {
+        return {
+            minutes: 15,
+            defaulted: true
+        };
+    }
+
+    const parsed = Number.parseInt(raw, 10);
+
+    if (!Number.isInteger(parsed) || parsed > 60) {
+        return {
+            minutes: 15,
+            defaulted: true
+        };
+    }
+
+    return {
+        minutes: parsed,
+        defaulted: false
+    };
+}
+
 async function postPatchNotesAnnouncement(client, payload) {
     if (!config.features || !config.features.reviewPostsEnabled) {
         return {
@@ -863,6 +888,39 @@ app.post('/api/admin/account-email-lookup', requireSharedSecret, async function 
             return res.status(500).json({
                 success: false,
                 message: 'Internal Core3 stop error.',
+                data: null
+            });
+        }
+    });
+
+    app.post('/api/admin/core3/shutdown', requireSharedSecret, async function (req, res) {
+        try {
+            if (!config.core3Control || !config.core3Control.enabled) {
+                return buildCore3DisabledResponse(res);
+            }
+
+            const normalized = normalizeShutdownMinutesInput(req.body ? req.body.minutes : '');
+            const result = await runCore3Control('shutdown', {
+                args: [String(normalized.minutes)]
+            });
+
+            return res.status(result.statusCode || (result.success ? 200 : 500)).json({
+                success: result.success,
+                message: normalized.defaulted
+                    ? `${result.message} Invalid shutdown minutes were supplied, so the request defaulted to 15 minute(s).`
+                    : `${result.message} Shutdown used ${normalized.minutes} minute(s).`,
+                data: {
+                    ...(result.data || {}),
+                    shutdownMinutes: normalized.minutes,
+                    shutdownMinutesDefaulted: normalized.defaulted
+                }
+            });
+        } catch (error) {
+            console.error(`[API Admin Core3 Shutdown] ${getErrorMessage(error)}`);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Internal Core3 shutdown error.',
                 data: null
             });
         }

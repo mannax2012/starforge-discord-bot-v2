@@ -1,7 +1,7 @@
 const { spawn } = require('child_process');
 const config = require('../config');
 
-const ALLOWED_ACTIONS = new Set(['run', 'stop', 'status', 'capture-crash']);
+const ALLOWED_ACTIONS = new Set(['run', 'stop', 'status', 'capture-crash', 'shutdown']);
 let core3RunInProgress = false;
 
 function quoteForBash(value) {
@@ -43,8 +43,14 @@ function parseKeyValueLines(output) {
     return data;
 }
 
-function buildCommandArguments(action) {
-    const shellCommand = `cd ${quoteForBash(config.core3Control.wslRepoPath)} && ${quoteForBash(config.core3Control.scriptPath)} ${action}`;
+function buildCommandArguments(action, options) {
+    const args = Array.isArray(options && options.args)
+        ? options.args.map((value) => String(value))
+        : [];
+    const commandSuffix = [action, ...args]
+        .map((value) => quoteForBash(value))
+        .join(' ');
+    const shellCommand = `cd ${quoteForBash(config.core3Control.wslRepoPath)} && ${quoteForBash(config.core3Control.scriptPath)} ${commandSuffix}`;
 
     if (process.platform === 'win32') {
         return {
@@ -59,9 +65,9 @@ function buildCommandArguments(action) {
     };
 }
 
-function executeCore3Control(action) {
+function executeCore3Control(action, options) {
     return new Promise((resolve, reject) => {
-        const { command, args } = buildCommandArguments(action);
+        const { command, args } = buildCommandArguments(action, options);
         const child = spawn(command, args, {
             cwd: process.cwd(),
             windowsHide: true
@@ -82,7 +88,10 @@ function executeCore3Control(action) {
             reject(error);
         });
 
-        const timeoutMs = Number(config.core3Control.timeoutMs) || 120000;
+        const defaultTimeoutMs = Number(config.core3Control.timeoutMs) || 120000;
+        const timeoutMs = action === 'shutdown'
+            ? Math.max(defaultTimeoutMs, 240000)
+            : defaultTimeoutMs;
         const timeoutId = setTimeout(() => {
             child.kill('SIGTERM');
             reject(new Error(`Core3 control action timed out after ${timeoutMs}ms.`));
@@ -135,7 +144,7 @@ function isCore3Running(data) {
     return statusText === 'running' || statusText === 'started' || statusText === 'up';
 }
 
-async function runCore3Control(action) {
+async function runCore3Control(action, options) {
     if (!config.core3Control || !config.core3Control.enabled) {
         throw new Error('Core3 control integration is disabled.');
     }
@@ -193,7 +202,7 @@ async function runCore3Control(action) {
         }
     }
 
-    const result = await executeCore3Control(action);
+    const result = await executeCore3Control(action, options);
     return {
         ...result,
         statusCode: result.success ? 200 : 500

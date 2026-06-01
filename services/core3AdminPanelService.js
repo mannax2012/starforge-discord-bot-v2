@@ -3,7 +3,7 @@ const config = require('../config');
 const { formatAttemptedEndpoints, postTcApiJson } = require('../utils/tcApiFetch');
 
 const PANEL_PREFIX = 'core3_admin_panel';
-const PANEL_ACTIONS = new Set(['run', 'stop', 'capture-crash']);
+const PANEL_ACTIONS = new Set(['run', 'stop', 'stop-confirm', 'stop-cancel', 'capture-crash', 'shutdown', 'shutdown-submit']);
 const PANEL_MODES = new Set(['live', 'tc']);
 
 function normalizePanelMode(mode) {
@@ -42,8 +42,14 @@ function buildCore3AdminEndpoint(mode, pathname) {
     return `${modeConfig.baseUrl}${pathname}`;
 }
 
-function buildButtonCustomId(ownerId, mode, action) {
-    return `${PANEL_PREFIX}:${ownerId}:${normalizePanelMode(mode)}:${action}`;
+function buildButtonCustomId(ownerId, mode, action, messageId) {
+    const parts = [PANEL_PREFIX, ownerId, normalizePanelMode(mode), action];
+
+    if (messageId) {
+        parts.push(String(messageId).trim());
+    }
+
+    return parts.join(':');
 }
 
 function buildButtonRow(ownerId, mode, disabled) {
@@ -59,10 +65,28 @@ function buildButtonRow(ownerId, mode, disabled) {
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(disabled),
         new ButtonBuilder()
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'shutdown'))
+            .setLabel('Shutdown Core3')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(disabled),
+        new ButtonBuilder()
             .setCustomId(buildButtonCustomId(ownerId, mode, 'stop'))
             .setLabel('Stop Core3')
             .setStyle(ButtonStyle.Danger)
             .setDisabled(disabled)
+    );
+}
+
+function buildStopConfirmRow(ownerId, mode) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'stop-confirm'))
+            .setLabel('Yes, Force Stop')
+            .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'stop-cancel'))
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Secondary)
     );
 }
 
@@ -91,11 +115,29 @@ function buildCore3AdminPanel(ownerId, openedByTag, mode, status) {
             `**Core3 Admin Panel (${formatModeLabel(normalizedMode)})**`,
             `Opened by: ${openedByTag}`,
             'Use the buttons below to control Core3.',
-            'Stop always runs crash capture first, then sends the stop request.',
+            'Shutdown is the clean save path and will ask for minutes.',
+            'Stop is a forced non-clean stop. It captures crash artifacts first, then sends the stop request.',
             '',
             formatPanelStatus(status)
         ].join('\n'),
         components: [buildButtonRow(ownerId, normalizedMode, disabled)]
+    };
+}
+
+function buildCore3StopConfirmPanel(ownerId, openedByTag, mode) {
+    const normalizedMode = normalizePanelMode(mode);
+
+    return {
+        content: [
+            `**Confirm Forced Stop (${formatModeLabel(normalizedMode)})**`,
+            `Opened by: ${openedByTag}`,
+            'This is not a clean shutdown.',
+            'Use `Shutdown Core3` if you want the server to disconnect players and save state cleanly.',
+            'Forced stop will capture crash artifacts first, then terminate Core3.',
+            '',
+            'Are you sure you want to continue?'
+        ].join('\n'),
+        components: [buildStopConfirmRow(ownerId, normalizedMode)]
     };
 }
 
@@ -106,10 +148,13 @@ function parseCore3AdminPanelCustomId(customId) {
         return null;
     }
 
-    if (parts.length === 4) {
+    if (parts.length === 4 || parts.length === 5) {
         const ownerId = String(parts[1] || '').trim();
         const mode = normalizePanelMode(parts[2]);
         const action = String(parts[3] || '').trim();
+        const messageId = parts.length === 5
+            ? String(parts[4] || '').trim()
+            : '';
 
         if (!ownerId || !mode || !PANEL_ACTIONS.has(action)) {
             return null;
@@ -118,7 +163,8 @@ function parseCore3AdminPanelCustomId(customId) {
         return {
             ownerId,
             mode,
-            action
+            action,
+            messageId
         };
     }
 
@@ -133,12 +179,13 @@ function parseCore3AdminPanelCustomId(customId) {
         return null;
     }
 
-    return {
-        ownerId,
-        mode: normalizePanelMode(config.core3AdminApi && config.core3AdminApi.defaultMode || 'live'),
-        action
-    };
-}
+        return {
+            ownerId,
+            mode: normalizePanelMode(config.core3AdminApi && config.core3AdminApi.defaultMode || 'live'),
+            action,
+            messageId: ''
+        };
+    }
 
 function buildActionPath(action) {
     switch (action) {
@@ -148,6 +195,8 @@ function buildActionPath(action) {
         return '/api/admin/core3/stop';
     case 'capture-crash':
         return '/api/admin/core3/capture-crash';
+    case 'shutdown':
+        return '/api/admin/core3/shutdown';
     default:
         throw new Error(`Unsupported Core3 admin action: ${action}`);
     }
@@ -161,7 +210,7 @@ function formatJsonMessage(json, fallback) {
     return message || fallback;
 }
 
-async function callCore3AdminEndpoint(action, mode) {
+async function callCore3AdminEndpoint(action, mode, payload) {
     const normalizedMode = normalizePanelMode(mode);
     const modeConfig = getModeApiConfig(normalizedMode);
     const endpoint = buildCore3AdminEndpoint(normalizedMode, buildActionPath(action));
@@ -169,7 +218,7 @@ async function callCore3AdminEndpoint(action, mode) {
     const requestResult = await postTcApiJson(
         endpoint,
         modeConfig.sharedSecret,
-        {},
+        payload || {},
         requestLabel
     );
 
@@ -195,8 +244,9 @@ async function callCore3AdminEndpoint(action, mode) {
     };
 }
 
-async function executeCore3AdminPanelAction(action, mode) {
+async function executeCore3AdminPanelAction(action, mode, options) {
     const normalizedMode = normalizePanelMode(mode);
+    const actionOptions = options || {};
 
     if (action === 'stop') {
         const captureCrashResult = await callCore3AdminEndpoint('capture-crash', normalizedMode);
@@ -230,7 +280,11 @@ async function executeCore3AdminPanelAction(action, mode) {
         };
     }
 
-    const result = await callCore3AdminEndpoint(action, normalizedMode);
+    const payload = action === 'shutdown'
+        ? { minutes: actionOptions.minutes }
+        : {};
+
+    const result = await callCore3AdminEndpoint(action, normalizedMode, payload);
 
     return {
         success: result.success,
@@ -253,6 +307,8 @@ function getActionLabel(action, mode) {
         return `Stop ${prefix}`;
     case 'capture-crash':
         return `Capture Crash (${prefix})`;
+    case 'shutdown':
+        return `Shutdown ${prefix}`;
     default:
         return `${prefix} Action`;
     }
@@ -260,6 +316,8 @@ function getActionLabel(action, mode) {
 
 module.exports = {
     buildCore3AdminPanel,
+    buildButtonCustomId,
+    buildCore3StopConfirmPanel,
     executeCore3AdminPanelAction,
     formatModeLabel,
     getActionLabel,
