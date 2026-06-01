@@ -18,7 +18,8 @@ module.exports = {
             '> `!pausechat` - Pause or resume the SWG chat relay (Admin).',
             '> `!fixchat` - Reconnect the SWG chat relay (Admin).',
             '> `!debugchat` - Enable verbose SWG chat logging (Admin).',
-            '> `!adminpanel` - Open the Core3 admin control panel in DM (Admin).',
+            '> `!adminpanel live` - Open the Live Core3 admin control panel in DM (Admin).',
+            '> `!adminpanel tc` - Open the TC Core3 admin control panel in DM (Admin).',
             '',
             `May the Force be with you, ${message.author.username}!`
         ].join('\n');

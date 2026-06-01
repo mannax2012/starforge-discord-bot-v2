@@ -390,6 +390,24 @@ module.exports = {
         timeoutMs: envInt('CORE3_CONTROL_TIMEOUT_MS', 120000)
     },
 
+    core3AdminApi: {
+        defaultMode: env('CORE3_ADMIN_API_DEFAULT_MODE', isTcMode ? 'tc' : 'live').trim().toLowerCase() === 'tc' ? 'tc' : 'live',
+        live: {
+            baseUrl: env(
+                'CORE3_ADMIN_API_LIVE_BASE_URL',
+                `http://127.0.0.1:${envInt('CORE3_ADMIN_API_LIVE_PORT', 44557)}`
+            ),
+            sharedSecret: env('CORE3_ADMIN_API_LIVE_SHARED_SECRET', env('WEBHOOK_SHARED_SECRET'))
+        },
+        tc: {
+            baseUrl: env(
+                'CORE3_ADMIN_API_TC_BASE_URL',
+                `http://127.0.0.1:${envInt('CORE3_ADMIN_API_TC_PORT', 44567)}`
+            ),
+            sharedSecret: env('CORE3_ADMIN_API_TC_SHARED_SECRET', env('TC_SHARED_SECRET'))
+        }
+    },
+
     launcher: {
         launcherGameSessionMinutes: envInt('LAUNCHER_GAME_SESSION_MINUTES', 5),
 

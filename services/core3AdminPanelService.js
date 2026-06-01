@@ -4,30 +4,62 @@ const { formatAttemptedEndpoints, postTcApiJson } = require('../utils/tcApiFetch
 
 const PANEL_PREFIX = 'core3_admin_panel';
 const PANEL_ACTIONS = new Set(['run', 'stop', 'capture-crash']);
+const PANEL_MODES = new Set(['live', 'tc']);
 
-function buildCore3AdminEndpoint(pathname) {
-    const port = Number(config.webListener && config.webListener.port) || 44557;
-    return `http://127.0.0.1:${port}${pathname}`;
+function normalizePanelMode(mode) {
+    const normalized = String(mode || config.core3AdminApi && config.core3AdminApi.defaultMode || 'live').trim().toLowerCase();
+    return PANEL_MODES.has(normalized) ? normalized : null;
 }
 
-function buildButtonCustomId(ownerId, action) {
-    return `${PANEL_PREFIX}:${ownerId}:${action}`;
+function formatModeLabel(mode) {
+    return normalizePanelMode(mode) === 'tc' ? 'TC' : 'Live';
 }
 
-function buildButtonRow(ownerId, disabled) {
+function getModeApiConfig(mode) {
+    const normalizedMode = normalizePanelMode(mode);
+
+    if (!normalizedMode) {
+        throw new Error(`Unsupported Core3 panel mode: ${mode}`);
+    }
+
+    const modeConfig = config.core3AdminApi && config.core3AdminApi[normalizedMode]
+        ? config.core3AdminApi[normalizedMode]
+        : null;
+
+    if (!modeConfig || !String(modeConfig.baseUrl || '').trim()) {
+        throw new Error(`Core3 admin API base URL is not configured for ${normalizedMode}.`);
+    }
+
+    return {
+        mode: normalizedMode,
+        baseUrl: String(modeConfig.baseUrl || '').trim().replace(/\/+$/, ''),
+        sharedSecret: String(modeConfig.sharedSecret || '').trim()
+    };
+}
+
+function buildCore3AdminEndpoint(mode, pathname) {
+    const modeConfig = getModeApiConfig(mode);
+    return `${modeConfig.baseUrl}${pathname}`;
+}
+
+function buildButtonCustomId(ownerId, mode, action) {
+    return `${PANEL_PREFIX}:${ownerId}:${normalizePanelMode(mode)}:${action}`;
+}
+
+function buildButtonRow(ownerId, mode, disabled) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId(buildButtonCustomId(ownerId, 'run'))
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'run'))
             .setLabel('Run Core3')
             .setStyle(ButtonStyle.Success)
             .setDisabled(disabled),
         new ButtonBuilder()
-            .setCustomId(buildButtonCustomId(ownerId, 'capture-crash'))
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'capture-crash'))
             .setLabel('Capture Crash')
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(disabled),
         new ButtonBuilder()
-            .setCustomId(buildButtonCustomId(ownerId, 'stop'))
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'stop'))
             .setLabel('Stop Core3')
             .setStyle(ButtonStyle.Danger)
             .setDisabled(disabled)
@@ -50,26 +82,47 @@ function formatPanelStatus(status) {
     return `${status.success ? 'Success' : 'Failed'}${timestamp}: ${status.message}`;
 }
 
-function buildCore3AdminPanel(ownerId, openedByTag, status) {
+function buildCore3AdminPanel(ownerId, openedByTag, mode, status) {
     const disabled = !!(status && status.state === 'working');
+    const normalizedMode = normalizePanelMode(mode);
 
     return {
         content: [
-            '**Core3 Admin Panel**',
+            `**Core3 Admin Panel (${formatModeLabel(normalizedMode)})**`,
             `Opened by: ${openedByTag}`,
             'Use the buttons below to control Core3.',
             'Stop always runs crash capture first, then sends the stop request.',
             '',
             formatPanelStatus(status)
         ].join('\n'),
-        components: [buildButtonRow(ownerId, disabled)]
+        components: [buildButtonRow(ownerId, normalizedMode, disabled)]
     };
 }
 
 function parseCore3AdminPanelCustomId(customId) {
     const parts = String(customId || '').split(':');
 
-    if (parts.length !== 3 || parts[0] !== PANEL_PREFIX) {
+    if (parts[0] !== PANEL_PREFIX) {
+        return null;
+    }
+
+    if (parts.length === 4) {
+        const ownerId = String(parts[1] || '').trim();
+        const mode = normalizePanelMode(parts[2]);
+        const action = String(parts[3] || '').trim();
+
+        if (!ownerId || !mode || !PANEL_ACTIONS.has(action)) {
+            return null;
+        }
+
+        return {
+            ownerId,
+            mode,
+            action
+        };
+    }
+
+    if (parts.length !== 3) {
         return null;
     }
 
@@ -82,6 +135,7 @@ function parseCore3AdminPanelCustomId(customId) {
 
     return {
         ownerId,
+        mode: normalizePanelMode(config.core3AdminApi && config.core3AdminApi.defaultMode || 'live'),
         action
     };
 }
@@ -107,12 +161,14 @@ function formatJsonMessage(json, fallback) {
     return message || fallback;
 }
 
-async function callCore3AdminEndpoint(action) {
-    const endpoint = buildCore3AdminEndpoint(buildActionPath(action));
-    const requestLabel = `Core3 ${action}`;
+async function callCore3AdminEndpoint(action, mode) {
+    const normalizedMode = normalizePanelMode(mode);
+    const modeConfig = getModeApiConfig(normalizedMode);
+    const endpoint = buildCore3AdminEndpoint(normalizedMode, buildActionPath(action));
+    const requestLabel = `${formatModeLabel(normalizedMode)} Core3 ${action}`;
     const requestResult = await postTcApiJson(
         endpoint,
-        config.webListener && config.webListener.sharedSecret,
+        modeConfig.sharedSecret,
         {},
         requestLabel
     );
@@ -133,20 +189,24 @@ async function callCore3AdminEndpoint(action) {
     return {
         success,
         action,
+        mode: normalizedMode,
         message: formatJsonMessage(json, success ? `${requestLabel} completed.` : `${requestLabel} failed.`),
         data: json.data || null
     };
 }
 
-async function executeCore3AdminPanelAction(action) {
+async function executeCore3AdminPanelAction(action, mode) {
+    const normalizedMode = normalizePanelMode(mode);
+
     if (action === 'stop') {
-        const captureCrashResult = await callCore3AdminEndpoint('capture-crash');
+        const captureCrashResult = await callCore3AdminEndpoint('capture-crash', normalizedMode);
 
         if (!captureCrashResult.success) {
             return {
                 success: false,
                 action,
-                message: `Crash capture failed before stop: ${captureCrashResult.message}`,
+                mode: normalizedMode,
+                message: `Crash capture failed before ${formatModeLabel(normalizedMode)} stop: ${captureCrashResult.message}`,
                 details: {
                     captureCrashResult,
                     stopResult: null
@@ -154,14 +214,15 @@ async function executeCore3AdminPanelAction(action) {
             };
         }
 
-        const stopResult = await callCore3AdminEndpoint('stop');
+        const stopResult = await callCore3AdminEndpoint('stop', normalizedMode);
 
         return {
             success: stopResult.success,
             action,
+            mode: normalizedMode,
             message: stopResult.success
-                ? 'Crash capture completed, then Core3 stop completed.'
-                : `Crash capture completed, but Core3 stop failed: ${stopResult.message}`,
+                ? `Crash capture completed, then ${formatModeLabel(normalizedMode)} Core3 stop completed.`
+                : `Crash capture completed, but ${formatModeLabel(normalizedMode)} Core3 stop failed: ${stopResult.message}`,
             details: {
                 captureCrashResult,
                 stopResult
@@ -169,11 +230,12 @@ async function executeCore3AdminPanelAction(action) {
         };
     }
 
-    const result = await callCore3AdminEndpoint(action);
+    const result = await callCore3AdminEndpoint(action, normalizedMode);
 
     return {
         success: result.success,
         action,
+        mode: normalizedMode,
         message: result.message,
         details: {
             directResult: result
@@ -181,22 +243,26 @@ async function executeCore3AdminPanelAction(action) {
     };
 }
 
-function getActionLabel(action) {
+function getActionLabel(action, mode) {
+    const prefix = `${formatModeLabel(mode)} Core3`;
+
     switch (action) {
     case 'run':
-        return 'Run Core3';
+        return `Run ${prefix}`;
     case 'stop':
-        return 'Stop Core3';
+        return `Stop ${prefix}`;
     case 'capture-crash':
-        return 'Capture Crash';
+        return `Capture Crash (${prefix})`;
     default:
-        return 'Core3 Action';
+        return `${prefix} Action`;
     }
 }
 
 module.exports = {
     buildCore3AdminPanel,
     executeCore3AdminPanelAction,
+    formatModeLabel,
     getActionLabel,
+    normalizePanelMode,
     parseCore3AdminPanelCustomId
 };

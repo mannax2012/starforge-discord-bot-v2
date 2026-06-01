@@ -3,6 +3,7 @@ const { activateAccountByUsername } = require('../services/accountService');
 const {
     buildCore3AdminPanel,
     executeCore3AdminPanelAction,
+    formatModeLabel,
     getActionLabel,
     parseCore3AdminPanelCustomId
 } = require('../services/core3AdminPanelService');
@@ -58,7 +59,7 @@ module.exports = {
 
         const core3PanelData = parseCore3AdminPanelCustomId(interaction.customId);
         if (core3PanelData) {
-            const { ownerId, action } = core3PanelData;
+            const { ownerId, mode, action } = core3PanelData;
 
             if (interaction.user.id !== ownerId) {
                 await interaction.reply({
@@ -68,21 +69,21 @@ module.exports = {
                 return;
             }
 
-            const actionLabel = getActionLabel(action);
+            const actionLabel = getActionLabel(action, mode);
 
             await interaction.deferUpdate();
             await interaction.message.edit(
-                buildCore3AdminPanel(ownerId, interaction.user.tag, {
+                buildCore3AdminPanel(ownerId, interaction.user.tag, mode, {
                     state: 'working',
                     label: actionLabel
                 })
             );
 
             try {
-                const result = await executeCore3AdminPanelAction(action);
+                const result = await executeCore3AdminPanelAction(action, mode);
 
                 await interaction.message.edit(
-                    buildCore3AdminPanel(ownerId, interaction.user.tag, {
+                    buildCore3AdminPanel(ownerId, interaction.user.tag, mode, {
                         state: 'done',
                         success: result.success,
                         message: result.message,
@@ -92,13 +93,13 @@ module.exports = {
 
                 await logToBotChannel(
                     client,
-                    `${interaction.user.tag} used the Core3 admin panel: ${actionLabel}. ${result.message}`
+                    `${interaction.user.tag} used the ${formatModeLabel(mode)} Core3 admin panel: ${actionLabel}. ${result.message}`
                 );
             } catch (error) {
                 console.error(`[Core3 Admin Panel] ${actionLabel} failed: ${error.message}`);
 
                 await interaction.message.edit(
-                    buildCore3AdminPanel(ownerId, interaction.user.tag, {
+                    buildCore3AdminPanel(ownerId, interaction.user.tag, mode, {
                         state: 'done',
                         success: false,
                         message: `${actionLabel} failed: ${error.message}`,
@@ -108,7 +109,7 @@ module.exports = {
 
                 await logToBotChannel(
                     client,
-                    `${interaction.user.tag} failed to use the Core3 admin panel for ${actionLabel}: ${error.message}`
+                    `${interaction.user.tag} failed to use the ${formatModeLabel(mode)} Core3 admin panel for ${actionLabel}: ${error.message}`
                 );
             }
 
