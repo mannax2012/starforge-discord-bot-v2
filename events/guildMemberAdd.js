@@ -4,6 +4,10 @@ const { logToBotChannel } = require('../services/logging');
 module.exports = {
     name: 'guildMemberAdd',
     async execute(member, client) {
+        if (config.isTcMode || !config.features.welcomeEnabled) {
+            return;
+        }
+
         await member.guild.roles.fetch();
 
         const role = member.guild.roles.cache.find(existingRole => existingRole.name === config.autoRoleName);

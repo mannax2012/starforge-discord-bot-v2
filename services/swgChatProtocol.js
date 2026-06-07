@@ -3,6 +3,27 @@ const crypto = require('crypto');
 const session = {lastAck: -1, lastSequence: -1};
 
 var verboseSWGLogging = false;
+var fragments = null;
+var fragmentLength = 0;
+
+function resetState() {
+    session.type = undefined;
+    session.connectionID = undefined;
+    session.CRCSeed = undefined;
+    session.CRCLength = undefined;
+    session.UseCompression = undefined;
+    session.SeedSize = undefined;
+    session.ServerUDPSize = undefined;
+    session.SessionKey = undefined;
+    session.sequence = 0;
+    session.lastAck = -1;
+    session.lastSequence = -1;
+    session.RequestID = 0;
+    fragments = null;
+    fragmentLength = 0;
+}
+
+resetState();
 
 module.exports.setVerboseLogging = function (enabled) {
     verboseSWGLogging = Boolean(enabled);
@@ -14,7 +35,11 @@ module.exports.debug = function () {
     console.log("[SWG Chat Protocol] Verbose logging enabled");
 }
 
-var fragments = null, fragmentLength;
+module.exports.reset = function () {
+    resetState();
+    return true;
+}
+
 var DecodeSOEPacket = module.exports.Decode = function(buf, decrypted) {
     if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf, "hex");
     var SOEHeader = buf.readUInt16BE(0);
@@ -282,6 +307,16 @@ EncodeSWGPacket["SessionRequest"] = function() {
     buf.writeUInt32BE(crypto.randomBytes(4).readUInt32BE(0), 6);
     buf.writeUInt32BE(496, 10);
     return buf;
+}
+
+EncodeSWGPacket["Disconnect"] = function(data) {
+    if (session.connectionID === undefined) return false;
+
+    var buf = Buffer.alloc(7);
+    buf.writeUInt16BE(0x0005, 0);
+    buf.writeUInt32BE(session.connectionID >>> 0, 2);
+    buf.writeUInt8((data && data.ReasonID) || 0, 6);
+    return Encrypt(buf);
 }
 
 DecodeSWGPacket[0xd5899226] = function(data) {

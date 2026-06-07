@@ -5,6 +5,27 @@ const APP_NAME = 'EntBot';
 
 let runners = [];
 let started = false;
+let workerRestartRequested = false;
+let shutdownPromise = null;
+
+function scheduleWorkerRestart(reason) {
+    if (workerRestartRequested) {
+        return;
+    }
+
+    workerRestartRequested = true;
+    console.error(`[${APP_NAME}] Worker restart requested${reason ? ` [reason=${reason}]` : ''}`);
+
+    void stopEntBot()
+        .catch((error) => {
+            console.error(`[${APP_NAME}] Failed to stop worker cleanly before restart: ${error.message}`);
+        })
+        .finally(() => {
+            setTimeout(() => {
+                process.exit(70);
+            }, 1000);
+        });
+}
 
 function getSettings() {
     return config.entBot || {};
@@ -156,6 +177,7 @@ function createRunner(settings, index) {
     const petAutoGroupDelayMs = Math.max(0, Number(settings.petAutoGroupDelayMs || petCallPauseMs || 3000));
     const startupCommandPauseMs = Math.max(0, Number(settings.startupCommandPauseMs || 3000));
     const inviteCleanupPauseMs = Math.max(0, Number(settings.inviteCleanupPauseMs || 750));
+    const autoRestartAfterReconnectAttempts = Math.max(0, Number(settings.autoRestartAfterReconnectAttempts || 0));
     let startupTimer = null;
     let performanceTimer = null;
     let advertTimer = null;
@@ -650,6 +672,22 @@ function createRunner(settings, index) {
             console.warn(`${label} Lost contact with the SWG server.`);
         };
 
+        swgChatClient.reconnectScheduled = function (info) {
+            if (!info || autoRestartAfterReconnectAttempts <= 0) {
+                return;
+            }
+
+            if (Number(info.attempt || 0) < autoRestartAfterReconnectAttempts) {
+                return;
+            }
+
+            scheduleWorkerRestart(
+                `${label} exceeded reconnect attempts`
+                + ` [attempt=${info.attempt}]`
+                + (info.reason ? ` [reason=${info.reason}]` : '')
+            );
+        };
+
         swgChatClient.serverUp = function () {
             console.log(`${label} SWG server connection recovered.`);
         };
@@ -660,7 +698,12 @@ function createRunner(settings, index) {
             clearPerformanceLoop();
             clearAdvertLoop();
 
-            console.log(`${label} Connected [character=${state.character}]`);
+            console.log(
+                `${label} Connected [character=${state.character}]`
+                + ` [reconnects=${state.reconnectCount || 0}]`
+                + ` [messagesIn=${state.messagesReceived || 0}]`
+                + ` [messagesOut=${state.messagesSent || 0}]`
+            );
 
             startupTimer = setTimeout(() => {
                 startupTimer = null;
@@ -712,17 +755,28 @@ function createRunner(settings, index) {
                 + `[petAutoCall=${petAutoCallEnabled}] `
                 + `[petAutoGroup=${petAutoGroupEnabled}] `
                 + `[autoAcceptGroupInvites=${autoAcceptGroupInvites}] `
+                + `[autoRestartAfterReconnectAttempts=${autoRestartAfterReconnectAttempts || 'disabled'}] `
                 + `[petControlDeviceIds=${petControlDeviceIds.join(' | ') || 'none'}] `
                 + `[petCallRadialId=${petCallRadialId}]`
             );
             return true;
         },
-        stop() {
+        async stop() {
             cancelStartupSequence();
             clearPerformanceLoop();
             clearAdvertLoop();
-            swgChatClient.destroy();
             runnerStarted = false;
+
+            try {
+                await swgChatClient.disconnect({
+                    reason: `${label} stop`,
+                    reconnect: false,
+                    stopTimers: true
+                });
+            } catch (error) {
+                console.error(`${label} Graceful disconnect failed: ${error.message}`);
+                swgChatClient.destroy();
+            }
         }
     };
 }
@@ -760,10 +814,9 @@ function startEntBot() {
     return true;
 }
 
-function stopEntBot() {
-    for (const runner of runners) {
-        runner.stop();
-    }
+async function stopEntBot() {
+    const currentRunners = runners.slice();
+    await Promise.all(currentRunners.map((runner) => runner.stop()));
 
     runners = [];
     started = false;
@@ -773,13 +826,28 @@ function startEntBotWorker() {
     return startEntBot();
 }
 
-function shutdown() {
-    stopEntBot();
-    process.exit(0);
+async function shutdown() {
+    if (shutdownPromise) {
+        return shutdownPromise;
+    }
+
+    shutdownPromise = stopEntBot()
+        .catch((error) => {
+            console.error(`[${APP_NAME}] Shutdown failed: ${error.message}`);
+        })
+        .finally(() => {
+            process.exit(0);
+        });
+
+    return shutdownPromise;
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.once('SIGINT', () => {
+    void shutdown();
+});
+process.once('SIGTERM', () => {
+    void shutdown();
+});
 
 module.exports = {
     startEntBotWorker,

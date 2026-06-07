@@ -1,4 +1,30 @@
-require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+
+const ENV_FILE_ORDER = [
+    '.env',
+    '.env.discord',
+    '.env.swg-chat',
+    '.env.ent-bot',
+    '.env.web-api',
+    '.env.status',
+    '.env.launcher',
+    '.env.database'
+];
+
+function loadEnvFiles() {
+    for (const fileName of ENV_FILE_ORDER) {
+        const filePath = path.join(__dirname, fileName);
+        if (!fs.existsSync(filePath)) {
+            continue;
+        }
+
+        dotenv.config({ path: filePath });
+    }
+}
+
+loadEnvFiles();
 
 function env(name, fallback = '') {
     const value = process.env[name];
@@ -243,6 +269,7 @@ function buildEntertainerSettings(baseSettings, overrides = {}) {
         reconnectMaxDelayMs: normalizeInt(merged.reconnectMaxDelayMs, 60000),
         reconnectJitterMs: normalizeInt(merged.reconnectJitterMs, 1500),
         reconnectStableResetMs: normalizeInt(merged.reconnectStableResetMs, 300000),
+        autoRestartAfterReconnectAttempts: Math.max(0, normalizeInt(merged.autoRestartAfterReconnectAttempts, 10)),
         verboseSwgLogging: normalizeBool(merged.verboseSwgLogging, false)
     };
 
@@ -261,13 +288,13 @@ const isDevMode = botMode === 'dev' || botMode === 'development';
 const isLiveMode = !isTcMode && !isDevMode;
 const usesLiveDefaults = !isTcMode;
 
-const discordEnabled = envBool('DISCORD_ENABLED', usesLiveDefaults);
-const reviewPostsEnabled = envBool('DISCORD_REVIEW_POSTS_ENABLED', usesLiveDefaults);
-const commandsEnabled = envBool('DISCORD_COMMANDS_ENABLED', usesLiveDefaults);
-const welcomeEnabled = envBool('DISCORD_WELCOME_ENABLED', usesLiveDefaults);
-const botLogEnabled = envBool('DISCORD_BOT_LOG_ENABLED', usesLiveDefaults);
-const webApiEnabled = envBool('WEB_LISTENER_ENABLED', true);
-const statusEnabled = envBool('STATUS_MONITOR_ENABLED', true);
+const discordEnabled = envBool('DISCORD_ENABLED', false);
+const reviewPostsEnabled = envBool('DISCORD_REVIEW_POSTS_ENABLED', false);
+const commandsEnabled = envBool('DISCORD_COMMANDS_ENABLED', false);
+const welcomeEnabled = envBool('DISCORD_WELCOME_ENABLED', false);
+const botLogEnabled = envBool('DISCORD_BOT_LOG_ENABLED', false);
+const webApiEnabled = envBool('WEB_LISTENER_ENABLED', false);
+const statusEnabled = envBool('STATUS_MONITOR_ENABLED', false);
 const swgChatEnabled = envBool('SWG_CHAT_ENABLED', false);
 const entBotEnabled = envBool('ENT_BOT_ENABLED', false);
 
@@ -336,6 +363,7 @@ const baseEntBotSettings = {
     reconnectMaxDelayMs: envInt('ENT_BOT_RECONNECT_MAX_DELAY_MS', 60000),
     reconnectJitterMs: envInt('ENT_BOT_RECONNECT_JITTER_MS', 1500),
     reconnectStableResetMs: envInt('ENT_BOT_RECONNECT_STABLE_RESET_MS', 300000),
+    autoRestartAfterReconnectAttempts: envInt('ENT_BOT_AUTO_RESTART_AFTER_RECONNECT_ATTEMPTS', 10),
     verboseSwgLogging: envBool('ENT_BOT_VERBOSE_SWG_LOGGING', false)
 };
 
@@ -426,7 +454,7 @@ module.exports = {
     },
 
     registrationMirror: {
-        enabled: envBool('TC_MIRROR_ENABLED', true),
+        enabled: envBool('TC_MIRROR_ENABLED', false),
         tcRegisterUrl: env('TC_REGISTER_MIRROR_URL', 'http://testcenter.swg-starforge.com:44567/api/internal/register-mirror'),
         tcActivateUrl: env('TC_ACTIVATE_MIRROR_URL', 'http://testcenter.swg-starforge.com:44567/api/internal/activate-mirror'),
         tcStatusUrl: env('TC_ACCOUNT_STATUS_URL', 'http://testcenter.swg-starforge.com:44567/api/internal/account-status'),
@@ -435,7 +463,7 @@ module.exports = {
     },
 
     accountNotifications: {
-        activationEmailEnabled: envBool('ACTIVATION_EMAIL_ENABLED', usesLiveDefaults),
+        activationEmailEnabled: envBool('ACTIVATION_EMAIL_ENABLED', false),
         activationEmailUrl: env('ACTIVATION_EMAIL_URL', ''),
         activationEmailSharedSecret: env('ACTIVATION_EMAIL_SHARED_SECRET', env('WEBHOOK_SHARED_SECRET', '')),
         activationEmailTimeoutMs: envInt('ACTIVATION_EMAIL_TIMEOUT_MS', 10000)

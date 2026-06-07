@@ -3,8 +3,13 @@ const path = require('path');
 const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
 const config = require('./config');
 const { startEntBotService } = require('./services/entBotService');
+const { stopEntBotService } = require('./services/entBotService');
 const { startStatusMonitor } = require('./services/statusMonitor');
+const { shutdownSwgChatBridge } = require('./services/swgChatBridge');
 const { startWebApi } = require('./web-api');
+
+let activeDiscordClient = null;
+let shutdownPromise = null;
 
 function loadDiscordRuntime(client) {
     client.commands = new Collection();
@@ -71,6 +76,61 @@ async function startDiscordMode() {
 
     loadDiscordRuntime(client);
     await client.login(config.token);
+    activeDiscordClient = client;
+    return client;
+}
+
+async function gracefulShutdown(signal) {
+    if (shutdownPromise) {
+        return shutdownPromise;
+    }
+
+    shutdownPromise = (async () => {
+        console.log(`[Shutdown] Received ${signal}; closing services.`);
+
+        try {
+            await shutdownSwgChatBridge({ reason: signal });
+        } catch (error) {
+            console.error(`[Shutdown] SWG chat bridge shutdown failed: ${error.message}`);
+        }
+
+        try {
+            await stopEntBotService();
+        } catch (error) {
+            console.error(`[Shutdown] Ent Bot shutdown failed: ${error.message}`);
+        }
+
+        if (activeDiscordClient) {
+            try {
+                activeDiscordClient.destroy();
+            } catch (error) {
+                console.error(`[Shutdown] Discord client cleanup failed: ${error.message}`);
+            }
+            activeDiscordClient = null;
+        }
+    })();
+
+    return shutdownPromise;
+}
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.once(signal, () => {
+        const forceExitTimer = setTimeout(() => {
+            process.exit(1);
+        }, 10000);
+        forceExitTimer.unref();
+
+        gracefulShutdown(signal)
+            .then(() => {
+                clearTimeout(forceExitTimer);
+                process.exit(0);
+            })
+            .catch((error) => {
+                console.error(`[Shutdown] Failed during ${signal}: ${error.message}`);
+                clearTimeout(forceExitTimer);
+                process.exit(1);
+            });
+    });
 }
 
 (async function bootstrap() {

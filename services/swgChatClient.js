@@ -1,5 +1,10 @@
 const dgram = require('dgram');
-const SOEProtocol = require('./swgChatProtocol');
+
+function createProtocolInstance() {
+    const protocolPath = require.resolve('./swgChatProtocol');
+    delete require.cache[protocolPath];
+    return require(protocolPath);
+}
 
 const KNOWN_COMMANDS = {
     invite: {
@@ -38,6 +43,7 @@ const KNOWN_COMMANDS = {
 };
 
 function createSwgChatClient() {
+    const SOEProtocol = createProtocolInstance();
     let server = {};
     let verboseSWGLogging = false;
     let commandQueueCounter = 0x40000000;
@@ -50,9 +56,19 @@ function createSwgChatClient() {
     let loggedIn = false;
     let fails = 0;
     let disconnectCount = 0;
+    let disconnectedSince = 0;
     let ackInterval = null;
     let pingInterval = null;
     let netStatusInterval = null;
+    let roomHealthInterval = null;
+    let startedAt = 0;
+    let reconnectCount = 0;
+    let messagesSent = 0;
+    let messagesReceived = 0;
+    let lastRoomResponseAt = 0;
+    let lastHealthLogAt = 0;
+    let manualDisconnectReason = '';
+    let manualDisconnectTimer = null;
     const discoveredObjects = new Map();
     const announcedControlDeviceIds = new Set();
 
@@ -63,6 +79,7 @@ function createSwgChatClient() {
         serverDown() {},
         serverUp() {},
         reconnected() {},
+        reconnectScheduled() {},
         recvTell(from, message) {},
         recvSystemMessage(message, packet) {},
         controlDeviceDiscovered(device) {},
@@ -71,6 +88,7 @@ function createSwgChatClient() {
             server = Object.assign({}, cfg);
             verboseSWGLogging = Boolean(server.verboseSWGLogging);
             SOEProtocol.setVerboseLogging(verboseSWGLogging);
+            startedAt = Date.now();
             resetConnectionTracking();
             startBackgroundTimers();
             Login();
@@ -87,9 +105,18 @@ function createSwgChatClient() {
         },
         restart() {
             resetConnectionTracking();
-            Login();
+            startedAt = Date.now();
+            return performManualDisconnect({
+                reason: 'manual restart',
+                reconnect: true,
+                stopTimers: false
+            });
+        },
+        disconnect(options) {
+            return performManualDisconnect(options);
         },
         getState() {
+            const now = Date.now();
             return {
                 isConnected: client.isConnected,
                 paused: client.paused,
@@ -98,8 +125,20 @@ function createSwgChatClient() {
                 character: server.Character || '',
                 chatRoom: server.ChatRoom || '',
                 roomId: server.ChatRoomID || 0,
+                chatRoomPath: server.ChatRoomPath || '',
                 serverName: server.SWGServerName || server.ServerName || '',
-                joinChatRoom: server.JoinChatRoom !== false
+                joinChatRoom: server.JoinChatRoom !== false,
+                startedAt,
+                uptimeMs: startedAt ? Math.max(0, now - startedAt) : 0,
+                reconnectCount,
+                reconnectAttempt,
+                messagesSent,
+                messagesReceived,
+                fails,
+                disconnectCount,
+                disconnectedSince,
+                lastRoomResponseAt,
+                roomHealthAgeMs: lastRoomResponseAt ? Math.max(0, now - lastRoomResponseAt) : 0
             };
         },
         getDiscoveredControlDevices() {
@@ -116,6 +155,7 @@ function createSwgChatClient() {
                 Message: ` \\#ff3333${user}: \\#ff66ff${message}`,
                 RoomID: server.ChatRoomID
             });
+            messagesSent += 1;
             return true;
         },
         sendTell(player, message) {
@@ -128,6 +168,7 @@ function createSwgChatClient() {
                 PlayerName: player,
                 Message: message
             });
+            messagesSent += 1;
             return true;
         },
         sendConsoleCommand(command) {
@@ -231,10 +272,14 @@ function createSwgChatClient() {
         },
         destroy() {
             clearReconnectTimer();
+            clearManualDisconnectTimer();
             stopBackgroundTimers();
             client.isConnected = false;
             connectedSince = 0;
+            startedAt = 0;
+            manualDisconnectReason = '';
             safeCloseSocket();
+            SOEProtocol.reset();
         }
     };
 
@@ -308,19 +353,50 @@ function createSwgChatClient() {
             const room = packet.Rooms[roomID];
             if (room.RoomPath.endsWith(server.ChatRoom)) {
                 server.ChatRoomID = room.RoomID;
+                server.ChatRoomPath = room.RoomPath;
+                lastRoomResponseAt = Date.now();
                 send('ChatEnterRoomById', {RoomID: room.RoomID});
             }
+        }
+    };
+    handlePacket.ChatQueryRoomResults = function (packet) {
+        if (verboseSWGLogging) console.log(JSON.stringify(packet, null, 2));
+
+        const requestedPath = getChatRoomQueryPath();
+        const roomPath = String(packet.RoomPath || '').trim();
+        const configuredRoom = String(server.ChatRoom || '').trim();
+
+        if (!roomPath || !requestedPath) {
+            return;
+        }
+
+        const matchesRoom = roomPath === requestedPath
+            || roomPath.endsWith(`.${configuredRoom}`)
+            || requestedPath.endsWith(`.${configuredRoom}`);
+
+        if (!matchesRoom) {
+            return;
+        }
+
+        server.ChatRoomID = packet.RoomID || server.ChatRoomID;
+        server.ChatRoomPath = roomPath;
+        lastRoomResponseAt = Date.now();
+
+        if (!client.isConnected && server.ChatRoomID) {
+            send('ChatEnterRoomById', {RoomID: server.ChatRoomID});
         }
     };
     handlePacket.ChatOnEnteredRoom = function (packet) {
         if (verboseSWGLogging) console.log(JSON.stringify(packet, null, 2));
         if (packet.RoomID === server.ChatRoomID && packet.PlayerName === server.Character) {
+            lastRoomResponseAt = Date.now();
             markConnected(`Joined room ${packet.RoomID} as ${packet.PlayerName}`);
         }
     };
     handlePacket.ChatRoomMessage = function (packet) {
         if (verboseSWGLogging) console.log(JSON.stringify(packet, null, 2));
         if (packet.RoomID === server.ChatRoomID && packet.CharacterName !== server.Character.toLowerCase()) {
+            messagesReceived += 1;
             client.recvChat(packet.Message, packet.CharacterName);
         }
     };
@@ -401,6 +477,14 @@ function createSwgChatClient() {
         }
     };
     handlePacket.Disconnect = function (packet) {
+        if (manualDisconnectReason) {
+            console.log(
+                `${getFullTimestamp()} - [SWG Chat] Disconnect received during ${manualDisconnectReason} `
+                + `[connectionId=${packet.connectionID}] [reason=${packet.reasonID}]`
+            );
+            return;
+        }
+
         console.warn(
             `${getFullTimestamp()} - [SWG Chat] Disconnect received [connectionId=${packet.connectionID}] `
             + `[reason=${packet.reasonID}] [count=${disconnectCount}]`
@@ -416,6 +500,14 @@ function createSwgChatClient() {
         lastMessageTime = new Date();
         fails = 0;
         disconnectCount = 0;
+        disconnectedSince = 0;
+        reconnectCount = 0;
+        messagesSent = 0;
+        messagesReceived = 0;
+        lastRoomResponseAt = 0;
+        lastHealthLogAt = 0;
+        manualDisconnectReason = '';
+        clearManualDisconnectTimer();
         discoveredObjects.clear();
         announcedControlDeviceIds.clear();
     }
@@ -456,6 +548,34 @@ function createSwgChatClient() {
                 send('ClientNetStatusRequest');
             }, 15000);
         }
+
+        if (!roomHealthInterval) {
+            const intervalMs = Math.max(10000, Number(server.roomHealthIntervalMs || 60000));
+            roomHealthInterval = setInterval(() => {
+                const now = Date.now();
+                logHealthSnapshot(now);
+
+                if (!client.isConnected || !server.ChatRoomID) {
+                    return;
+                }
+
+                const roomPath = getChatRoomQueryPath();
+                if (!roomPath) {
+                    return;
+                }
+
+                send('ChatQueryRoom', {RoomPath: roomPath});
+
+                const maxStaleMs = Math.max(intervalMs * 2, Number(server.roomHealthMaxStaleMs || 300000));
+                if (lastRoomResponseAt && (now - lastRoomResponseAt) > maxStaleMs) {
+                    console.warn(
+                        `${getFullTimestamp()} - [SWG Chat] No chat room query response for ${now - lastRoomResponseAt}ms `
+                        + `for ${roomPath}; forcing reconnect.`
+                    );
+                    scheduleReconnect('chat room health timeout');
+                }
+            }, intervalMs);
+        }
     }
 
     function stopBackgroundTimers() {
@@ -472,6 +592,11 @@ function createSwgChatClient() {
         if (netStatusInterval) {
             clearInterval(netStatusInterval);
             netStatusInterval = null;
+        }
+
+        if (roomHealthInterval) {
+            clearInterval(roomHealthInterval);
+            roomHealthInterval = null;
         }
     }
 
@@ -538,6 +663,7 @@ function createSwgChatClient() {
             reconnectAttempt = 0;
         }
         lastConnectedDurationMs = 0;
+        disconnectedSince = 0;
 
         if (!client.isConnected) {
             client.isConnected = true;
@@ -553,12 +679,59 @@ function createSwgChatClient() {
         fails = 0;
     }
 
+    function getChatRoomQueryPath() {
+        const resolvedPath = String(server.ChatRoomPath || '').trim();
+        if (resolvedPath) {
+            return resolvedPath;
+        }
+
+        const roomName = String(server.ChatRoom || '').trim();
+        if (!roomName) {
+            return '';
+        }
+
+        if (roomName.startsWith('SWG.')) {
+            return roomName;
+        }
+
+        const serverName = String(server.ServerName || server.SWGServerName || '').trim();
+        return serverName ? `SWG.${serverName}.${roomName}` : roomName;
+    }
+
+    function logHealthSnapshot(now = Date.now()) {
+        if (!startedAt) {
+            return;
+        }
+
+        const intervalMs = Math.max(60000, Number(server.healthMetricsIntervalMs || 300000));
+        if (lastHealthLogAt && (now - lastHealthLogAt) < intervalMs) {
+            return;
+        }
+
+        lastHealthLogAt = now;
+
+        console.log(
+            `${getFullTimestamp()} - [SWG Chat] Health `
+            + `[uptimeMs=${Math.max(0, now - startedAt)}] `
+            + `[connected=${client.isConnected}] `
+            + `[roomId=${server.ChatRoomID || 0}] `
+            + `[reconnects=${reconnectCount}] `
+            + `[messagesIn=${messagesReceived}] `
+            + `[messagesOut=${messagesSent}] `
+            + `[fails=${fails}] `
+            + `[roomHealthAgeMs=${lastRoomResponseAt ? Math.max(0, now - lastRoomResponseAt) : 0}]`
+        );
+    }
+
     function Login() {
         clearReconnectTimer();
+        clearManualDisconnectTimer();
+        manualDisconnectReason = '';
         loggedIn = false;
         client.isConnected = false;
         connectedSince = 0;
         safeCloseSocket();
+        SOEProtocol.reset();
 
         if (!server.LoginAddress || !server.LoginPort) {
             console.warn(`${getFullTimestamp()} - [SWG Chat] Login settings are incomplete.`);
@@ -588,15 +761,30 @@ function createSwgChatClient() {
         reconnectTimer = null;
     }
 
+    function clearManualDisconnectTimer() {
+        if (!manualDisconnectTimer) {
+            return;
+        }
+
+        clearTimeout(manualDisconnectTimer);
+        manualDisconnectTimer = null;
+    }
+
     function scheduleReconnect(reason) {
-        if (reconnectTimer) {
+        if (reconnectTimer || manualDisconnectReason) {
             return false;
         }
 
         client.isConnected = false;
         lastConnectedDurationMs = connectedSince ? (Date.now() - connectedSince) : 0;
         connectedSince = 0;
+        loggedIn = false;
         safeCloseSocket();
+
+        const reconnectStartedAt = Date.now();
+        if (!disconnectedSince) {
+            disconnectedSince = reconnectStartedAt;
+        }
 
         const baseDelayMs = Math.max(1000, Number(server.reconnectBaseDelayMs || 5000));
         const maxDelayMs = Math.max(baseDelayMs, Number(server.reconnectMaxDelayMs || 60000));
@@ -606,12 +794,21 @@ function createSwgChatClient() {
         const delayMs = exponentialDelay + randomizedJitter;
 
         reconnectAttempt += 1;
+        reconnectCount += 1;
 
         console.warn(
             `${getFullTimestamp()} - [SWG Chat] Scheduling reconnect in ${delayMs}ms`
             + (reason ? ` [reason=${reason}]` : '')
             + ` [attempt=${reconnectAttempt}]`
         );
+
+        client.reconnectScheduled({
+            reason: String(reason || ''),
+            attempt: reconnectAttempt,
+            delayMs,
+            lastConnectedDurationMs,
+            disconnectedDurationMs: Math.max(0, reconnectStartedAt - disconnectedSince)
+        });
 
         reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
@@ -620,6 +817,63 @@ function createSwgChatClient() {
         }, delayMs);
 
         return true;
+    }
+
+    function performManualDisconnect(options = {}) {
+        const {
+            reason = 'manual disconnect',
+            reconnect = false,
+            stopTimers = !reconnect,
+            reconnectDelayMs = Math.max(100, Number(server.disconnectFlushMs || 250)),
+            resetProtocol = true
+        } = options;
+
+        clearReconnectTimer();
+        clearManualDisconnectTimer();
+
+        const finalize = () => {
+            clearManualDisconnectTimer();
+            if (stopTimers) {
+                stopBackgroundTimers();
+            }
+
+            client.isConnected = false;
+            lastConnectedDurationMs = connectedSince ? (Date.now() - connectedSince) : lastConnectedDurationMs;
+            connectedSince = 0;
+            loggedIn = false;
+            safeCloseSocket();
+
+            if (resetProtocol) {
+                SOEProtocol.reset();
+            }
+
+            manualDisconnectReason = '';
+
+            if (reconnect) {
+                lastMessageTime = new Date();
+                Login();
+            }
+        };
+
+        manualDisconnectReason = String(reason || 'manual disconnect');
+
+        try {
+            send('Disconnect', {ReasonID: 0});
+        } catch (error) {
+            // best-effort disconnect only
+        }
+
+        if (!socket) {
+            finalize();
+            return Promise.resolve(true);
+        }
+
+        return new Promise((resolve) => {
+            manualDisconnectTimer = setTimeout(() => {
+                finalize();
+                resolve(true);
+            }, reconnectDelayMs);
+        });
     }
 
     function safeCloseSocket() {

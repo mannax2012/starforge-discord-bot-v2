@@ -40,6 +40,7 @@ The merged repo's `.env.example` now includes the newer Ent Bot settings:
 - `ENT_BOT_AUTO_ACCEPT_GROUP_INVITES`
 - `ENT_BOT_GROUP_INVITE_ACCEPT_COMMAND`
 - `ENT_BOT_GROUP_INVITE_RESPONSE_PAUSE_MS`
+- `ENT_BOT_AUTO_RESTART_AFTER_RECONNECT_ATTEMPTS`
 - `ENT_BOT_ENTERTAINERS` JSON example block
 
 ## Immediate security action

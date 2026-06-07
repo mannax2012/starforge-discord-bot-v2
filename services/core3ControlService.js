@@ -3,6 +3,7 @@ const config = require('../config');
 
 const ALLOWED_ACTIONS = new Set(['run', 'stop', 'status', 'capture-crash', 'shutdown']);
 let core3RunInProgress = false;
+const DEFAULT_SHUTDOWN_TIMEOUT_GRACE_MS = 240000;
 
 function quoteForBash(value) {
     return `'${String(value || '').replace(/'/g, `'\"'\"'`)}'`;
@@ -65,6 +66,34 @@ function buildCommandArguments(action, options) {
     };
 }
 
+function normalizeShutdownMinutes(value) {
+    const parsed = Number.parseInt(String(value == null ? '' : value).trim(), 10);
+
+    if (!Number.isInteger(parsed) || parsed < 0) {
+        return 0;
+    }
+
+    return parsed;
+}
+
+function getCore3ControlTimeoutMs(action, options) {
+    const defaultTimeoutMs = Number(config.core3Control.timeoutMs) || 120000;
+
+    if (action !== 'shutdown') {
+        return defaultTimeoutMs;
+    }
+
+    const shutdownMinutes = normalizeShutdownMinutes(
+        Array.isArray(options && options.args) ? options.args[0] : 0
+    );
+    const scheduledShutdownMs = shutdownMinutes * 60000;
+
+    return Math.max(
+        defaultTimeoutMs,
+        scheduledShutdownMs + DEFAULT_SHUTDOWN_TIMEOUT_GRACE_MS
+    );
+}
+
 function executeCore3Control(action, options) {
     return new Promise((resolve, reject) => {
         const { command, args } = buildCommandArguments(action, options);
@@ -88,10 +117,7 @@ function executeCore3Control(action, options) {
             reject(error);
         });
 
-        const defaultTimeoutMs = Number(config.core3Control.timeoutMs) || 120000;
-        const timeoutMs = action === 'shutdown'
-            ? Math.max(defaultTimeoutMs, 240000)
-            : defaultTimeoutMs;
+        const timeoutMs = getCore3ControlTimeoutMs(action, options);
         const timeoutId = setTimeout(() => {
             child.kill('SIGTERM');
             reject(new Error(`Core3 control action timed out after ${timeoutMs}ms.`));

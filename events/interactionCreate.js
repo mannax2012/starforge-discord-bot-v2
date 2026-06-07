@@ -255,6 +255,10 @@ module.exports = {
             return;
         }
 
+        if (config.isTcMode) {
+            return;
+        }
+
         if (!interaction.customId.startsWith('activate_account:')) {
             return;
         }

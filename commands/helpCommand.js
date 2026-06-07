@@ -17,6 +17,7 @@ module.exports = {
             '> `!chatstatus` - Show the current SWG chat relay state.',
             '> `!pausechat` - Pause or resume the SWG chat relay (Admin).',
             '> `!fixchat` - Reconnect the SWG chat relay (Admin).',
+            '> `!fixent` - Reconnect the entertainer bot worker (Admin).',
             '> `!debugchat` - Enable verbose SWG chat logging (Admin).',
             '> `!adminpanel live` - Open the Live Core3 admin control panel in DM (Admin).',
             '> `!adminpanel tc` - Open the TC Core3 admin control panel in DM (Admin).',

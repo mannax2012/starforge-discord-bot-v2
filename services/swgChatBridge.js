@@ -13,6 +13,7 @@ let statusDiscordClient = null;
 let chatDiscordClient = null;
 let statusMessageId = '';
 let currentServerStatus = 'connecting';
+let shutdownPromise = null;
 
 const STATUS_STATE_PATH = path.join(__dirname, '..', 'data', 'swg_chat_status_message.json');
 
@@ -468,12 +469,12 @@ function toggleSwgChatPause(forceValue) {
     return swgChatClient.setPaused(!swgChatClient.paused);
 }
 
-function restartSwgChatBridge() {
+async function restartSwgChatBridge() {
     if (!started) {
         return false;
     }
 
-    swgChatClient.restart();
+    await swgChatClient.restart();
     return true;
 }
 
@@ -482,11 +483,57 @@ function enableSwgChatDebug() {
     return true;
 }
 
+async function shutdownSwgChatBridge(options = {}) {
+    if (shutdownPromise) {
+        return shutdownPromise;
+    }
+
+    shutdownPromise = (async () => {
+        const { reason = 'shutdown' } = options;
+
+        const secondaryChatClient = chatDiscordClient
+            && statusDiscordClient
+            && chatDiscordClient !== statusDiscordClient
+            ? chatDiscordClient
+            : null;
+
+        try {
+            await swgChatClient.disconnect({
+                reason: `bridge ${reason}`,
+                reconnect: false,
+                stopTimers: true
+            });
+        } catch (error) {
+            console.error(`[SWG Chat] Graceful shutdown failed: ${error.message}`);
+            swgChatClient.destroy();
+        }
+
+        if (secondaryChatClient) {
+            try {
+                await secondaryChatClient.destroy();
+            } catch (error) {
+                console.error(`[SWG Chat] Failed to close secondary Discord client: ${error.message}`);
+            }
+        }
+
+        started = false;
+        chatChannel = null;
+        notificationChannel = null;
+        statusDiscordClient = null;
+        chatDiscordClient = null;
+    })().finally(() => {
+        shutdownPromise = null;
+    });
+
+    return shutdownPromise;
+}
+
 module.exports = {
     enableSwgChatDebug,
     getSwgChatState,
     handleDiscordMessage,
     restartSwgChatBridge,
+    shutdownSwgChatBridge,
     startSwgChatBridge,
     toggleSwgChatPause
 };

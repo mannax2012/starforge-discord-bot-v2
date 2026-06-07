@@ -19,7 +19,7 @@ module.exports = {
             return message.reply('SWG chat bridge is disabled.');
         }
 
-        const restarted = restartSwgChatBridge();
+        const restarted = await restartSwgChatBridge();
         if (!restarted) {
             return message.reply('SWG chat bridge is not running yet.');
         }
