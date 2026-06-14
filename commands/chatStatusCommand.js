@@ -1,4 +1,6 @@
+const { SlashCommandBuilder } = require('discord.js');
 const { getSwgChatState } = require('../services/swgChatBridge');
+const { replyToContext } = require('../utils/commandContext');
 
 function formatDuration(ms) {
     const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
@@ -12,7 +14,10 @@ function formatDuration(ms) {
 module.exports = {
     name: 'chatstatus',
     description: 'Shows the current SWG chat relay state.',
-    async execute(message) {
+    slashData: new SlashCommandBuilder()
+        .setName('chatstatus')
+        .setDescription('Shows the current SWG chat relay state.'),
+    async execute(context) {
         const state = getSwgChatState();
 
         const reply = [
@@ -33,9 +38,9 @@ module.exports = {
             `Reconnects: ${state.reconnectCount || 0} (active backoff attempt ${state.reconnectAttempt || 0})`,
             `Messages: in ${state.messagesReceived || 0} / out ${state.messagesSent || 0}`,
             `Failures: ${state.fails || 0} | Disconnects: ${state.disconnectCount || 0}`,
-            `Last Room Health Response: ${state.lastRoomResponseAt ? formatDuration(state.roomHealthAgeMs) + ' ago' : '--'}`
+            `Last Room Health Response: ${state.lastRoomResponseAt ? `${formatDuration(state.roomHealthAgeMs)} ago` : '--'}`
         ].join('\n');
 
-        await message.reply(reply);
+        await replyToContext(context, reply, true);
     }
 };

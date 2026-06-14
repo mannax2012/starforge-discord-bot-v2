@@ -4,6 +4,7 @@ const config = require('../config');
 
 let worker = null;
 let restartTimer = null;
+let recycleTimer = null;
 let isStopping = false;
 let stoppingPromise = null;
 
@@ -20,6 +21,19 @@ function clearRestartTimer() {
     restartTimer = null;
 }
 
+function getRecycleIntervalMs() {
+    return Math.max(0, Number(config.entBot && config.entBot.recycleIntervalMs || 0));
+}
+
+function clearRecycleTimer() {
+    if (!recycleTimer) {
+        return;
+    }
+
+    clearTimeout(recycleTimer);
+    recycleTimer = null;
+}
+
 function scheduleRestart() {
     if (isStopping || !entBotEnabled() || restartTimer) {
         return;
@@ -29,6 +43,35 @@ function scheduleRestart() {
         restartTimer = null;
         startEntBotService();
     }, 5000);
+}
+
+function scheduleRecycle() {
+    const recycleIntervalMs = getRecycleIntervalMs();
+
+    clearRecycleTimer();
+
+    if (isStopping || !worker || recycleIntervalMs <= 0) {
+        return;
+    }
+
+    recycleTimer = setTimeout(async () => {
+        recycleTimer = null;
+
+        if (isStopping || !worker) {
+            return;
+        }
+
+        console.log(`[EntBot] Scheduled recycle triggered after ${Math.round(recycleIntervalMs / 60000)} minute(s).`);
+
+        try {
+            await restartEntBotService();
+        } catch (error) {
+            console.error(`[EntBot] Scheduled recycle failed: ${error.message}`);
+            scheduleRecycle();
+        }
+    }, recycleIntervalMs);
+
+    recycleTimer.unref();
 }
 
 function startEntBotService() {
@@ -49,6 +92,7 @@ function startEntBotService() {
         stdio: 'inherit'
     });
     worker = child;
+    scheduleRecycle();
 
     console.log(`[EntBot] Started worker [pid=${child.pid}]`);
 
@@ -61,6 +105,7 @@ function startEntBotService() {
         }
 
         worker = null;
+        clearRecycleTimer();
 
         if (code === 64) {
             console.warn('[EntBot] Worker reported invalid or incomplete configuration. Not restarting automatically.');
@@ -84,6 +129,7 @@ function getEntBotServiceState() {
 function stopEntBotService() {
     isStopping = true;
     clearRestartTimer();
+    clearRecycleTimer();
 
     if (!worker) {
         return Promise.resolve(false);
@@ -138,6 +184,7 @@ async function restartEntBotService() {
         return false;
     }
 
+    clearRecycleTimer();
     await stopEntBotService();
     clearRestartTimer();
     isStopping = false;

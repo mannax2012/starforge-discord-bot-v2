@@ -10,7 +10,7 @@ module.exports = {
 
         await member.guild.roles.fetch();
 
-        const role = member.guild.roles.cache.find(existingRole => existingRole.name === config.autoRoleName);
+        const role = member.guild.roles.cache.find((existingRole) => existingRole.name === config.autoRoleName);
         if (!role) {
             await logToBotChannel(client, `⚠️ Role "${config.autoRoleName}" was not found in guild "${member.guild.name}".`);
             return;
@@ -24,7 +24,9 @@ module.exports = {
             return;
         }
 
-        const welcomeChannel = member.guild.channels.cache.find(channel => channel.name === config.welcomeChannelName && channel.isTextBased());
+        const welcomeChannel = member.guild.channels.cache.find(
+            (channel) => channel.name === config.welcomeChannelName && channel.isTextBased()
+        );
         if (!welcomeChannel) {
             await logToBotChannel(client, `⚠️ Welcome channel "${config.welcomeChannelName}" was not found.`);
             return;
@@ -34,12 +36,12 @@ module.exports = {
             `📜 **Welcome to Starforge, <@${member.id}>!**`,
             '',
             'To get started:',
-            '🔗 Go to **https://swg-starforge.com** or use `!register` to create your account.',
+            '🔗 Go to **https://swg-starforge.com** or use `/register` to create your account.',
             '🕒 Please allow up to **24 hours** for an admin to activate your account.',
             `💾 [Download SWG Starforge Installer](${config.downloadUrl})`,
             '',
             'Useful Commands:',
-            '🤖 `!help` — Shows a list of things I can do for you!',
+            '🤖 `/help` — Shows a list of things I can do for you!',
             '',
             '🔥 May the Force be with you!'
         ].join('\n');

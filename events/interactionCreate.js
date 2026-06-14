@@ -5,6 +5,7 @@ const {
     TextInputBuilder,
     TextInputStyle
 } = require('discord.js');
+const config = require('../config');
 const { activateAccountByUsername } = require('../services/accountService');
 const {
     buildButtonCustomId,
@@ -44,6 +45,18 @@ function formatActivationEmailStatus(data) {
     }
 
     return data.activationEmailMessage || 'Activation email was skipped.';
+}
+
+function getActivationReviewSourceLabel(message) {
+    const embed = message && Array.isArray(message.embeds) && message.embeds.length
+        ? message.embeds[0]
+        : null;
+    const fields = embed && Array.isArray(embed.fields) ? embed.fields : [];
+    const sourceField = fields.find((field) => String(field && field.name || '').trim().toLowerCase() === 'source');
+
+    return sourceField && sourceField.value
+        ? String(sourceField.value).trim()
+        : '';
 }
 
 function formatPanelTimestamp() {
@@ -136,6 +149,33 @@ async function executeCore3PanelAction(panelMessage, actorTag, ownerId, mode, ac
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
+        if (interaction.isChatInputCommand()) {
+            const command = client.commands.get(interaction.commandName);
+            if (!command) {
+                return;
+            }
+
+            try {
+                await command.execute(interaction, [], client);
+            } catch (error) {
+                console.error(`[Slash Command] ${interaction.commandName} failed: ${error.message}`);
+
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp({
+                        content: '❌ There was an error executing that command.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+
+                await interaction.reply({
+                    content: '❌ There was an error executing that command.',
+                    ephemeral: true
+                });
+            }
+            return;
+        }
+
         if (interaction.isButton()) {
             const core3PanelData = parseCore3AdminPanelCustomId(interaction.customId);
             if (core3PanelData) {
@@ -290,16 +330,18 @@ module.exports = {
             }
 
             const emailStatus = formatActivationEmailStatus(result.data);
+            const sourceLabel = getActivationReviewSourceLabel(interaction.message);
+            const sourceLine = sourceLabel ? `\nSource: ${sourceLabel}` : '';
 
             await interaction.update({
-                content: `Account \`${username}\` activated by **${interaction.user.tag}**.\n${emailStatus}`,
+                content: `Account \`${username}\` activated by **${interaction.user.tag}**.${sourceLine}\n${emailStatus}`,
                 embeds: [],
                 components: []
             });
 
             await logToBotChannel(
                 client,
-                `${interaction.user.tag} activated account \`${username}\` from a Discord review button. ${emailStatus}`
+                `${interaction.user.tag} activated account \`${username}\` from a Discord review button.${sourceLabel ? ` Source: ${sourceLabel}.` : ''} ${emailStatus}`
             );
         } catch (error) {
             console.error(`[Activation Button] ${username} failed: ${error.message}`);

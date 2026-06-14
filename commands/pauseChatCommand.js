@@ -1,29 +1,43 @@
+const { SlashCommandBuilder } = require('discord.js');
 const { userHasAdminRole } = require('../utils/roleCheck');
 const { logToBotChannel } = require('../services/logging');
 const { getSwgChatState, toggleSwgChatPause } = require('../services/swgChatBridge');
+const {
+    getActor,
+    getMember,
+    isInteractionContext,
+    replyToContext
+} = require('../utils/commandContext');
 
 module.exports = {
     name: 'pausechat',
     description: 'Pauses or unpauses the SWG chat relay (Admin only).',
-    async execute(message, args, client) {
-        if (!message.guild || !message.member) {
-            return message.reply('This command can only be used in a server channel.');
+    slashData: new SlashCommandBuilder()
+        .setName('pausechat')
+        .setDescription('Pauses or resumes the SWG chat relay. Admin only.'),
+    async execute(context, args, client) {
+        const actor = getActor(context);
+        const member = getMember(context);
+        const isSlash = isInteractionContext(context);
+
+        if (!context.guild || !member) {
+            return replyToContext(context, 'This command can only be used in a server channel.', true);
         }
 
-        if (!userHasAdminRole(message.member)) {
-            return message.reply('You do not have permission to use this command.');
+        if (!userHasAdminRole(member)) {
+            return replyToContext(context, 'You do not have permission to use this command.', true);
         }
 
         const state = getSwgChatState();
         if (!state.enabled) {
-            return message.reply('SWG chat bridge is disabled.');
+            return replyToContext(context, 'SWG chat bridge is disabled.', true);
         }
 
         const paused = toggleSwgChatPause();
-        await message.reply(paused ? 'SWG chat relay paused.' : 'SWG chat relay resumed.');
+        await replyToContext(context, paused ? 'SWG chat relay paused.' : 'SWG chat relay resumed.', isSlash);
         await logToBotChannel(
             client,
-            `${message.author.tag} ${paused ? 'paused' : 'resumed'} the SWG chat relay.`
+            `${actor.tag} ${paused ? 'paused' : 'resumed'} the SWG chat relay.`
         );
     }
 };

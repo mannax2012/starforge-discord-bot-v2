@@ -119,6 +119,9 @@ async function registerUser(username, password, email, client, message, options)
     const normalizedEmail = String(email || '').trim();
     const suppressBotLog = Boolean(opts.suppressBotLog);
     const skipTcMirror = Boolean(opts.skipTcMirror);
+    const requesterTag = message && message.author && message.author.tag
+        ? message.author.tag
+        : (message && message.user && message.user.tag ? message.user.tag : '');
 
     console.log(`[Register] Starting [username=${normalizedUsername}] [mode=${isTcMode() ? 'tc' : 'live'}] [skipTcMirror=${skipTcMirror}]`);
 
@@ -196,7 +199,7 @@ async function registerUser(username, password, email, client, message, options)
         if (!suppressBotLog) {
             await logToBotChannel(
                 client,
-                `✅ New account registered: \`${normalizedUsername}\`${message ? ` by ${message.author.tag}` : ''}`
+                `New account registered: \`${normalizedUsername}\`${requesterTag ? ` by ${requesterTag}` : ''}`
             );
         }
 
@@ -214,7 +217,7 @@ async function registerUser(username, password, email, client, message, options)
             if (!mirrorResult.success && mirrorResult.attempted) {
                 await logToBotChannel(
                     client,
-                    `⚠️ Live account \`${normalizedUsername}\` was created, but TC mirror creation failed: ${mirrorResult.message}`
+                    `Live account \`${normalizedUsername}\` was created, but TC mirror creation failed: ${mirrorResult.message}`
                 );
             }
         } else {
@@ -237,7 +240,7 @@ async function registerUser(username, password, email, client, message, options)
         if (!suppressBotLog) {
             await logToBotChannel(
                 client,
-                `❌ Registration failed for \`${normalizedUsername}\`: ${error.message}`
+                `Registration failed for \`${normalizedUsername}\`: ${error.message}`
             );
         }
 

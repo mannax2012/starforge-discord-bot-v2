@@ -538,7 +538,7 @@ function createSwgChatClient() {
                 const tick = new Date().getTime() & 0xFFFF;
                 buf.writeUInt16BE(tick, 0);
                 buf.writeUInt16BE(0x7701, 2);
-                socket.send(buf, server.PingPort, server.Address);
+                sendPacket(socket, buf, server.PingPort, server.Address, 'ping');
             }, 1000);
         }
 
@@ -742,11 +742,11 @@ function createSwgChatClient() {
         server.Port = server.LoginPort;
         server.PingPort = undefined;
 
-        socket = dgram.createSocket('udp4');
-        socket.on('message', handleMessage);
-        socket.on('error', (error) => {
-            console.error(`${getFullTimestamp()} - [SWG Chat] Socket error: ${error.message}`);
-            scheduleReconnect('socket error');
+        const currentSocket = dgram.createSocket('udp4');
+        socket = currentSocket;
+        currentSocket.on('message', handleMessage);
+        currentSocket.on('error', (error) => {
+            handleSocketError(error, currentSocket, 'socket event');
         });
 
         send('SessionRequest');
@@ -881,15 +881,58 @@ function createSwgChatClient() {
             return;
         }
 
+        const socketToClose = socket;
+        socket = null;
+
         try {
-            socket.removeAllListeners('message');
-            socket.removeAllListeners('error');
-            socket.close();
+            socketToClose.removeAllListeners('message');
+            socketToClose.removeAllListeners('error');
+            socketToClose.on('error', () => {});
+            socketToClose.close();
         } catch (error) {
             // ignore socket cleanup failures
         }
+    }
 
-        socket = null;
+    function handleSocketError(error, targetSocket, context) {
+        if (!error) {
+            return;
+        }
+
+        const detail = error instanceof Error ? error.message : String(error);
+        const contextLabel = context ? ` during ${context}` : '';
+
+        if (targetSocket && targetSocket !== socket) {
+            if (verboseSWGLogging) {
+                console.warn(`${getFullTimestamp()} - [SWG Chat] Ignoring stale socket error${contextLabel}: ${detail}`);
+            }
+            return;
+        }
+
+        if (manualDisconnectReason) {
+            if (verboseSWGLogging) {
+                console.warn(
+                    `${getFullTimestamp()} - [SWG Chat] Ignoring socket error${contextLabel} `
+                    + `during ${manualDisconnectReason}: ${detail}`
+                );
+            }
+            return;
+        }
+
+        console.error(`${getFullTimestamp()} - [SWG Chat] Socket error${contextLabel}: ${detail}`);
+        scheduleReconnect(`socket error${contextLabel}: ${detail}`);
+    }
+
+    function sendPacket(targetSocket, packet, port, address, context) {
+        if (!targetSocket) {
+            return;
+        }
+
+        targetSocket.send(packet, port, address, (error) => {
+            if (error) {
+                handleSocketError(error, targetSocket, context);
+            }
+        });
     }
 
     function send(type, data) {
@@ -906,14 +949,15 @@ function createSwgChatClient() {
             console.log(`${getFullTimestamp()} - send: ${type}`);
         }
 
+        const currentSocket = socket;
         if (Array.isArray(buf)) {
             for (const packet of buf) {
-                socket.send(packet, server.Port, server.Address);
+                sendPacket(currentSocket, packet, server.Port, server.Address, type);
             }
             return;
         }
 
-        socket.send(buf, server.Port, server.Address);
+        sendPacket(currentSocket, buf, server.Port, server.Address, type);
     }
 
     function upsertDiscoveredObject(objectId, patch) {

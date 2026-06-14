@@ -297,6 +297,7 @@ const webApiEnabled = envBool('WEB_LISTENER_ENABLED', false);
 const statusEnabled = envBool('STATUS_MONITOR_ENABLED', false);
 const swgChatEnabled = envBool('SWG_CHAT_ENABLED', false);
 const entBotEnabled = envBool('ENT_BOT_ENABLED', false);
+const entBotRecycleIntervalMinutes = Math.max(0, envInt('ENT_BOT_RECYCLE_INTERVAL_MINUTES', 0));
 
 const baseEntBotSettings = {
     loginAddress: env(
@@ -530,6 +531,8 @@ module.exports = {
 
     entBot: {
         enabled: entBotEnabled,
+        recycleIntervalMinutes: entBotRecycleIntervalMinutes,
+        recycleIntervalMs: entBotRecycleIntervalMinutes * 60 * 1000,
         ...baseEntBotSettings,
         entertainers,
         bandEnabled: entertainers.length > 1

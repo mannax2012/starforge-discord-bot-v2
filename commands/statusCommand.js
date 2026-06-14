@@ -1,5 +1,12 @@
+const { SlashCommandBuilder } = require('discord.js');
 const { readCurrentStatus } = require('../services/statusMonitor');
 const { logToBotChannel } = require('../services/logging');
+const {
+    getActor,
+    getChannelId,
+    isInteractionContext,
+    replyToContext
+} = require('../utils/commandContext');
 
 function safeInt(value, fallback) {
     const parsed = Number.parseInt(value, 10);
@@ -104,7 +111,12 @@ function getUptimeSeconds(status) {
 module.exports = {
     name: 'status',
     description: 'Shows the current Starforge server status.',
-    async execute(message, args, client) {
+    slashData: new SlashCommandBuilder()
+        .setName('status')
+        .setDescription('Shows the current Starforge server status.'),
+    async execute(context, args, client) {
+        const actor = getActor(context);
+        const commandLabel = isInteractionContext(context) ? '/status' : '!status';
         const status = readCurrentStatus();
 
         const serverName = getServerName(status);
@@ -123,7 +135,10 @@ module.exports = {
             `**Uptime:** ${uptime}`
         ].join('\n');
 
-        await message.reply(reply);
-        await logToBotChannel(client, `📥 ${message.author.tag} used !status in <#${message.channel.id}>.`);
+        await replyToContext(context, reply);
+        await logToBotChannel(
+            client,
+            `📥 ${actor.tag} used ${commandLabel}${getChannelId(context) ? ` in <#${getChannelId(context)}>` : ''}.`
+        );
     }
 };
