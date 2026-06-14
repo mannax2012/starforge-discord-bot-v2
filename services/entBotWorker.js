@@ -788,7 +788,11 @@ function createRunner(settings, index) {
                 reconnectBaseDelayMs: settings.reconnectBaseDelayMs,
                 reconnectMaxDelayMs: settings.reconnectMaxDelayMs,
                 reconnectJitterMs: settings.reconnectJitterMs,
-                reconnectStableResetMs: settings.reconnectStableResetMs
+                reconnectStableResetMs: settings.reconnectStableResetMs,
+                roomHealthIntervalMs: settings.roomHealthIntervalMs,
+                roomHealthMaxStaleMs: settings.roomHealthMaxStaleMs,
+                healthMetricsIntervalMs: settings.healthMetricsIntervalMs,
+                disconnectFlushMs: settings.disconnectFlushMs
             });
 
             runnerStarted = true;
