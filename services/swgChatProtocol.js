@@ -102,26 +102,48 @@ var DecodeSOEPacket = module.exports.Decode = function(buf, decrypted) {
         if (operands == 0x1900) {
             var ret = [];
             var offset = 6;
-            while (offset < buf.length - 3) {
+            const trailerStart = buf.length - 3;
+            while (offset < trailerStart) {
+                if ((offset + 1) > trailerStart) {
+                    logMalformedPacket(`Truncated 0x0009 multipacket length prefix [offset=${offset}] [length=${buf.length}]`);
+                    break;
+                }
+
                 var len = buf.readUInt8(offset);
-                offset++;
-                operands = buf.readUInt16LE(offset);
-                opcode = buf.readUInt32LE(offset + 2);
+                if (len < 6) {
+                    logMalformedPacket(`Invalid 0x0009 multipacket length ${len} [offset=${offset}] [length=${buf.length}]`);
+                    break;
+                }
+
+                const entryOffset = offset + 1;
+                const entryEnd = entryOffset + len;
+                if (entryEnd > trailerStart) {
+                    logMalformedPacket(
+                        `Truncated 0x0009 multipacket entry [offset=${offset}] [entryLength=${len}] [length=${buf.length}]`
+                    );
+                    break;
+                }
+
+                operands = buf.readUInt16LE(entryOffset);
+                opcode = buf.readUInt32LE(entryOffset + 2);
                 if (verboseSWGLogging && !ignoreTable[opcode])
                     console.log(getFullTimestamp() + " - Received packet with operands 0x1900, opcode " + opcodeLookup(opcode) + " (0x" +  opcode.toString(16).toLowerCase().padStart(8, 0)  + ") from server."); 
                 if (!DecodeSWGPacket[opcode]) {
                     ret.push({type: opcode.toString(16) + " " + len});
                 }
                 else {
-                    var data = buf.subarray(offset + 6, offset + len);
+                    var data = buf.subarray(entryOffset + 6, entryEnd);
                     if (verboseSWGLogging) {
                         console.log(getFullTimestamp() + " - Received " + data.length +  " byte packet with opcode " + opcodeLookup(opcode) + " (0x" +  opcode.toString(16).toLowerCase().padStart(8, 0)  + ") from server."); 
                         console.log("Hex: " + data.toString('hex'));
                         console.log("ASCII: " + data.toString('ascii').replace(/[^A-Za-z0-9!"#$%&'()*+,.\/:;<=>?@\[\] ^_`{|}~-]/g, ' ').split('').join(' '));
                     }
-                    ret.push(DecodeSWGPacket[opcode](data));
+                    const decoded = decodeSwgPacketSafely(opcode, data, `0x0009 multipacket len=${len}`);
+                    if (decoded) {
+                        ret.push(decoded);
+                    }
                 }
-                offset += len;
+                offset = entryEnd;
             }
             return ret;
         }
@@ -132,7 +154,7 @@ var DecodeSOEPacket = module.exports.Decode = function(buf, decrypted) {
          if (!DecodeSWGPacket[opcode])
             return [{type: opcode.toString(16) + " " + len}];
         else
-            return [DecodeSWGPacket[opcode](buf.subarray(10, decrypted ? buf.length : -3))];
+            return [decodeSwgPacketSafely(opcode, buf.subarray(10, decrypted ? buf.length : -3), "0x0009 single packet")].filter(Boolean);
     }
     else if (SOEHeader == 0x000d) {
         var sequence = buf.readUInt16BE(2);
@@ -150,7 +172,8 @@ var DecodeSOEPacket = module.exports.Decode = function(buf, decrypted) {
                 var operands = buf.readUInt16LE(0);
                 opcode = buf.readUInt32LE(2);
                 if (!DecodeSWGPacket[opcode]) return [{type: opcode.toString(16) + " " + buf.length}];
-                var ret = [DecodeSWGPacket[opcode](buf.subarray(6))];
+                var decodedPacket = decodeSwgPacketSafely(opcode, buf.subarray(6), "0x000d fragment");
+                var ret = decodedPacket ? [decodedPacket] : [];
                 return ret;
             } else if (fragments.length > fragmentLength) {
                 //console.log("extra data fragment", fragments.length , "/", fragmentLength);
@@ -268,6 +291,30 @@ function extractReadableText(data) {
     const asciiText = normalizeReadableText(data.toString('latin1'));
 
     return utf16Text.length >= asciiText.length ? utf16Text : asciiText;
+}
+
+function logMalformedPacket(message) {
+    console.warn(`${getFullTimestamp()} - [SWG Chat Protocol] ${message}`);
+}
+
+function decodeSwgPacketSafely(opcode, data, context) {
+    try {
+        return DecodeSWGPacket[opcode](data);
+    } catch (error) {
+        logMalformedPacket(
+            `Dropped malformed ${opcodeLookup(opcode)} `
+            + `(0x${opcode.toString(16).toLowerCase().padStart(8, '0')}) `
+            + `[context=${context}] [payloadLength=${Buffer.isBuffer(data) ? data.length : 0}] `
+            + `[error=${error.message}]`
+        );
+
+        if (verboseSWGLogging && Buffer.isBuffer(data)) {
+            console.log("Hex: " + data.toString('hex'));
+            console.log("ASCII: " + data.toString('ascii').replace(/[^A-Za-z0-9!\"#$%&'()*+,.\/:;<=>?@\[\] ^_`{|}~-]/g, ' ').split('').join(' '));
+        }
+
+        return null;
+    }
 }
 
 function EncodeSOEHeader(opcode, operands) {
@@ -963,16 +1010,44 @@ DecodeSWGPacket[0x35d7cc9f] = function(data) {
 }
 
 function AString(buf) {
-    var len = buf.readUInt16LE(buf.off);
-    var str = buf.subarray(buf.off+2, buf.off+2+len).toString("ascii");
-    buf.off += 2 + len;
+    const start = Number.isInteger(buf.off) ? buf.off : 0;
+    ensureReadableRange(buf, start, 2, "AString length");
+    var len = buf.readUInt16LE(start);
+    ensureReadableRange(buf, start + 2, len, `AString body len=${len}`);
+    var str = buf.subarray(start + 2, start + 2 + len).toString("ascii");
+    buf.off = start + 2 + len;
     return str;
 }
 function UString(buf) {
-    var len = buf.readUInt32LE(buf.off);
-    var str = buf.subarray(buf.off+4, buf.off+4+len*2).toString("utf16le");
-    buf.off += 4 + len*2;
+    const start = Number.isInteger(buf.off) ? buf.off : 0;
+    ensureReadableRange(buf, start, 4, "UString length");
+    var len = buf.readUInt32LE(start);
+    const byteLength = len * 2;
+    if (!Number.isSafeInteger(byteLength)) {
+        throw new RangeError(`UString byte length is not safe [chars=${len}]`);
+    }
+    ensureReadableRange(buf, start + 4, byteLength, `UString body chars=${len}`);
+    var str = buf.subarray(start + 4, start + 4 + byteLength).toString("utf16le");
+    buf.off = start + 4 + byteLength;
     return str;
+}
+
+function ensureReadableRange(buf, offset, size, context) {
+    if (!Buffer.isBuffer(buf)) {
+        throw new TypeError(`${context} requires a Buffer`);
+    }
+
+    if (!Number.isInteger(offset) || offset < 0) {
+        throw new RangeError(`${context} offset is invalid: ${offset}`);
+    }
+
+    if (!Number.isInteger(size) || size < 0) {
+        throw new RangeError(`${context} size is invalid: ${size}`);
+    }
+
+    if ((offset + size) > buf.length) {
+        throw new RangeError(`${context} exceeds buffer [offset=${offset}] [size=${size}] [length=${buf.length}]`);
+    }
 }
 
 function writeAString(buf, str) {
