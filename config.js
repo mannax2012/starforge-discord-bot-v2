@@ -233,6 +233,10 @@ function buildEntertainerSettings(baseSettings, overrides = {}) {
         password: normalizeString(merged.password, ''),
         character: normalizeString(merged.character, ''),
         chatRoom: normalizeString(merged.chatRoom, baseSettings.chatRoom),
+        connectionRefreshIntervalMinutes: Math.max(
+            0,
+            normalizeInt(merged.connectionRefreshIntervalMinutes, baseSettings.connectionRefreshIntervalMinutes || 0)
+        ),
         performanceType: normalizeString(merged.performanceType, 'dance').trim().toLowerCase() || 'dance',
         performanceCommand: normalizeString(merged.performanceCommand, ''),
         performanceCommands: normalizeCommandList(merged.performanceCommands),
@@ -273,6 +277,7 @@ function buildEntertainerSettings(baseSettings, overrides = {}) {
         verboseSwgLogging: normalizeBool(merged.verboseSwgLogging, false)
     };
 
+    settings.connectionRefreshIntervalMs = settings.connectionRefreshIntervalMinutes * 60 * 1000;
     settings.performanceCommands = resolvePerformanceCommands(settings);
     settings.petAutoGroupDelayMs = Math.max(
         0,
@@ -297,9 +302,14 @@ const webApiEnabled = envBool('WEB_LISTENER_ENABLED', false);
 const statusEnabled = envBool('STATUS_MONITOR_ENABLED', false);
 const swgChatEnabled = envBool('SWG_CHAT_ENABLED', false);
 const entBotEnabled = envBool('ENT_BOT_ENABLED', false);
-const entBotRecycleIntervalMinutes = Math.max(0, envInt('ENT_BOT_RECYCLE_INTERVAL_MINUTES', 0));
+const entBotConnectionRefreshIntervalMinutes = Math.max(
+    0,
+    envInt('ENT_BOT_CONNECTION_REFRESH_INTERVAL_MINUTES', envInt('ENT_BOT_RECYCLE_INTERVAL_MINUTES', 0))
+);
+const entBotProcessRecycleIntervalMinutes = Math.max(0, envInt('ENT_BOT_PROCESS_RECYCLE_INTERVAL_MINUTES', 0));
 
 const baseEntBotSettings = {
+    connectionRefreshIntervalMinutes: entBotConnectionRefreshIntervalMinutes,
     loginAddress: env(
         'ENT_BOT_LOGIN_ADDRESS',
         isTcMode
@@ -531,8 +541,10 @@ module.exports = {
 
     entBot: {
         enabled: entBotEnabled,
-        recycleIntervalMinutes: entBotRecycleIntervalMinutes,
-        recycleIntervalMs: entBotRecycleIntervalMinutes * 60 * 1000,
+        connectionRefreshIntervalMinutes: entBotConnectionRefreshIntervalMinutes,
+        connectionRefreshIntervalMs: entBotConnectionRefreshIntervalMinutes * 60 * 1000,
+        processRecycleIntervalMinutes: entBotProcessRecycleIntervalMinutes,
+        processRecycleIntervalMs: entBotProcessRecycleIntervalMinutes * 60 * 1000,
         ...baseEntBotSettings,
         entertainers,
         bandEnabled: entertainers.length > 1

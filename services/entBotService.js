@@ -22,7 +22,7 @@ function clearRestartTimer() {
 }
 
 function getRecycleIntervalMs() {
-    return Math.max(0, Number(config.entBot && config.entBot.recycleIntervalMs || 0));
+    return Math.max(0, Number(config.entBot && config.entBot.processRecycleIntervalMs || 0));
 }
 
 function clearRecycleTimer() {

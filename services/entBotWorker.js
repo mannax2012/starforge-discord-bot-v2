@@ -169,6 +169,7 @@ function createRunner(settings, index) {
     const autoAcceptGroupInvites = Boolean(settings.autoAcceptGroupInvites);
     const groupInviteAcceptCommand = String(settings.groupInviteAcceptCommand || '').trim();
     const groupInviteResponsePauseMs = Math.max(0, Number(settings.groupInviteResponsePauseMs || 500));
+    const connectionRefreshIntervalMs = Math.max(0, Number(settings.connectionRefreshIntervalMs || 0));
     const petDiscoveryEnabled = settings.petDiscoveryEnabled !== false;
     const petDiscoveryDebug = Boolean(settings.petDiscoveryDebug);
     const petControlDeviceIds = Array.isArray(settings.petControlDeviceIds) ? settings.petControlDeviceIds : [];
@@ -181,6 +182,7 @@ function createRunner(settings, index) {
     let startupTimer = null;
     let performanceTimer = null;
     let advertTimer = null;
+    let connectionRefreshTimer = null;
     let advertIndex = 0;
     let runnerStarted = false;
     let startupSequenceId = 0;
@@ -215,6 +217,48 @@ function createRunner(settings, index) {
 
         clearInterval(advertTimer);
         advertTimer = null;
+    }
+
+    function clearConnectionRefreshTimer() {
+        if (!connectionRefreshTimer) {
+            return;
+        }
+
+        clearTimeout(connectionRefreshTimer);
+        connectionRefreshTimer = null;
+    }
+
+    function scheduleConnectionRefresh() {
+        clearConnectionRefreshTimer();
+
+        if (!runnerStarted || connectionRefreshIntervalMs <= 0) {
+            return;
+        }
+
+        connectionRefreshTimer = setTimeout(() => {
+            connectionRefreshTimer = null;
+
+            if (!runnerStarted) {
+                return;
+            }
+
+            if (!swgChatClient.isConnected) {
+                scheduleConnectionRefresh();
+                return;
+            }
+
+            console.log(
+                `${label} Refreshing SWG connection after `
+                + `${Math.round(connectionRefreshIntervalMs / 60000)} minute(s).`
+            );
+
+            void swgChatClient.restart().catch((error) => {
+                console.error(`${label} Soft connection refresh failed: ${error.message}`);
+                scheduleConnectionRefresh();
+            });
+        }, connectionRefreshIntervalMs);
+
+        connectionRefreshTimer.unref();
     }
 
     function rememberDiscoveryObjectId(objectId) {
@@ -669,10 +713,12 @@ function createRunner(settings, index) {
         };
 
         swgChatClient.serverDown = function () {
+            clearConnectionRefreshTimer();
             console.warn(`${label} Lost contact with the SWG server.`);
         };
 
         swgChatClient.reconnectScheduled = function (info) {
+            clearConnectionRefreshTimer();
             if (!info || autoRestartAfterReconnectAttempts <= 0) {
                 return;
             }
@@ -697,6 +743,7 @@ function createRunner(settings, index) {
             cancelStartupSequence();
             clearPerformanceLoop();
             clearAdvertLoop();
+            scheduleConnectionRefresh();
 
             console.log(
                 `${label} Connected [character=${state.character}]`
@@ -750,6 +797,7 @@ function createRunner(settings, index) {
                 + `[performanceCommands=${performanceCommands.join(' | ') || 'none'}] `
                 + `[startupCommands=${startupCommands.join(' | ') || 'none'}] `
                 + `[inviteCleanupCommands=${inviteCleanupCommands.join(' | ') || 'none'}] `
+                + `[connectionRefreshIntervalMinutes=${connectionRefreshIntervalMs > 0 ? Math.round(connectionRefreshIntervalMs / 60000) : 'disabled'}] `
                 + `[petDiscovery=${petDiscoveryEnabled}] `
                 + `[petDiscoveryDebug=${petDiscoveryDebug}] `
                 + `[petAutoCall=${petAutoCallEnabled}] `
@@ -765,6 +813,7 @@ function createRunner(settings, index) {
             cancelStartupSequence();
             clearPerformanceLoop();
             clearAdvertLoop();
+            clearConnectionRefreshTimer();
             runnerStarted = false;
 
             try {

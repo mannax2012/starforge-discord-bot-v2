@@ -790,21 +790,21 @@ DecodeSWGPacket[0xc4de864e] = function(data) {
         AString(data);//galaxy
         ret.Players.push(AString(data));
     }
-    var count = data.readUInt32LE(0);
+    var count = data.readUInt32LE(data.off);
     data.off += 4;
     for (var i = 0; i < count; i++) {
         AString(data);//swg
         AString(data);//galaxy
         ret.Invited.push(AString(data));
     }
-    var count = data.readUInt32LE(0);
+    var count = data.readUInt32LE(data.off);
     data.off += 4;
     for (var i = 0; i < count; i++) {
         AString(data);//swg
         AString(data);//galaxy
         ret.Moderators.push(AString(data));
     }
-    var count = data.readUInt32LE(0);
+    var count = data.readUInt32LE(data.off);
     data.off += 4;
     for (var i = 0; i < count; i++) {
         AString(data);//swg
