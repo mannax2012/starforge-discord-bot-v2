@@ -16,10 +16,10 @@ const {
 
 module.exports = {
     name: 'adminpanel',
-    description: 'Sends the Core3 admin control panel in DM (Admin only).',
+    description: 'Sends the Core3 and Ent Bot admin control panel in DM (Admin only).',
     slashData: new SlashCommandBuilder()
         .setName('adminpanel')
-        .setDescription('Sends the Core3 admin control panel in DM. Admin only.')
+        .setDescription('Sends the Core3 and Ent Bot admin control panel in DM. Admin only.')
         .addStringOption((option) => (
             option
                 .setName('mode')

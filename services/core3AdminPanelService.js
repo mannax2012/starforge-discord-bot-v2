@@ -1,9 +1,26 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../config');
+const {
+    getEntBotServiceState,
+    restartEntBotService,
+    startEntBotService,
+    stopEntBotService
+} = require('./entBotService');
 const { formatAttemptedEndpoints, postTcApiJson } = require('../utils/tcApiFetch');
 
 const PANEL_PREFIX = 'core3_admin_panel';
-const PANEL_ACTIONS = new Set(['run', 'stop', 'stop-confirm', 'stop-cancel', 'capture-crash', 'shutdown', 'shutdown-submit']);
+const PANEL_ACTIONS = new Set([
+    'run',
+    'stop',
+    'stop-confirm',
+    'stop-cancel',
+    'capture-crash',
+    'shutdown',
+    'shutdown-submit',
+    'ent-start',
+    'ent-stop',
+    'ent-restart'
+]);
 const PANEL_MODES = new Set(['live', 'tc']);
 
 function normalizePanelMode(mode) {
@@ -77,6 +94,30 @@ function buildButtonRow(ownerId, mode, disabled) {
     );
 }
 
+function buildEntBotButtonRow(ownerId, mode, disabled) {
+    const entBotState = getEntBotServiceState();
+    const controlsDisabled = disabled || !entBotState.enabled;
+    const isStarted = !!entBotState.started;
+
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'ent-start'))
+            .setLabel('Start Ent Bot')
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(controlsDisabled || isStarted),
+        new ButtonBuilder()
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'ent-restart'))
+            .setLabel('Restart Ent Bot')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(controlsDisabled),
+        new ButtonBuilder()
+            .setCustomId(buildButtonCustomId(ownerId, mode, 'ent-stop'))
+            .setLabel('Stop Ent Bot')
+            .setStyle(ButtonStyle.Danger)
+            .setDisabled(controlsDisabled || !isStarted)
+    );
+}
+
 function buildStopConfirmRow(ownerId, mode) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -106,21 +147,40 @@ function formatPanelStatus(status) {
     return `${status.success ? 'Success' : 'Failed'}${timestamp}: ${status.message}`;
 }
 
+function formatEntBotStatus() {
+    const state = getEntBotServiceState();
+
+    if (!state.enabled) {
+        return 'Ent Bot: disabled in this environment.';
+    }
+
+    if (!state.started) {
+        return 'Ent Bot: stopped.';
+    }
+
+    const pidText = state.pid ? ` [pid=${state.pid}]` : '';
+    return `Ent Bot: running${pidText}.`;
+}
+
 function buildCore3AdminPanel(ownerId, openedByTag, mode, status) {
     const disabled = !!(status && status.state === 'working');
     const normalizedMode = normalizePanelMode(mode);
 
     return {
         content: [
-            `**Core3 Admin Panel (${formatModeLabel(normalizedMode)})**`,
+            `**Core3 + Ent Bot Admin Panel (${formatModeLabel(normalizedMode)})**`,
             `Opened by: ${openedByTag}`,
             'Use the buttons below to control Core3.',
             'Shutdown is the clean save path and will ask for minutes.',
             'Stop is a forced non-clean stop. It captures crash artifacts first, then sends the stop request.',
+            formatEntBotStatus(),
             '',
             formatPanelStatus(status)
         ].join('\n'),
-        components: [buildButtonRow(ownerId, normalizedMode, disabled)]
+        components: [
+            buildButtonRow(ownerId, normalizedMode, disabled),
+            buildEntBotButtonRow(ownerId, normalizedMode, disabled)
+        ]
     };
 }
 
@@ -179,13 +239,13 @@ function parseCore3AdminPanelCustomId(customId) {
         return null;
     }
 
-        return {
-            ownerId,
-            mode: normalizePanelMode(config.core3AdminApi && config.core3AdminApi.defaultMode || 'live'),
-            action,
-            messageId: ''
-        };
-    }
+    return {
+        ownerId,
+        mode: normalizePanelMode(config.core3AdminApi && config.core3AdminApi.defaultMode || 'live'),
+        action,
+        messageId: ''
+    };
+}
 
 function buildActionPath(action) {
     switch (action) {
@@ -297,6 +357,76 @@ async function executeCore3AdminPanelAction(action, mode, options) {
     };
 }
 
+async function executeEntBotAdminPanelAction(action) {
+    const state = getEntBotServiceState();
+
+    if (!state.enabled) {
+        return {
+            success: false,
+            action,
+            message: 'Ent Bot is disabled in this environment.'
+        };
+    }
+
+    if (action === 'ent-start') {
+        if (state.started) {
+            return {
+                success: true,
+                action,
+                message: state.pid
+                    ? `Ent Bot is already running [pid=${state.pid}].`
+                    : 'Ent Bot is already running.'
+            };
+        }
+
+        const started = startEntBotService();
+        return {
+            success: !!started,
+            action,
+            message: started ? 'Ent Bot start requested.' : 'Ent Bot could not be started.'
+        };
+    }
+
+    if (action === 'ent-stop') {
+        if (!state.started) {
+            return {
+                success: true,
+                action,
+                message: 'Ent Bot is already stopped.'
+            };
+        }
+
+        const stopped = await stopEntBotService();
+        return {
+            success: !!stopped,
+            action,
+            message: stopped ? 'Ent Bot stop requested.' : 'Ent Bot could not be stopped.'
+        };
+    }
+
+    if (action === 'ent-restart') {
+        if (!state.started) {
+            const started = startEntBotService();
+            return {
+                success: !!started,
+                action,
+                message: started
+                    ? 'Ent Bot was stopped, so the restart action started it.'
+                    : 'Ent Bot restart could not start the worker.'
+            };
+        }
+
+        const restarted = await restartEntBotService();
+        return {
+            success: !!restarted,
+            action,
+            message: restarted ? 'Ent Bot restart requested.' : 'Ent Bot could not be restarted.'
+        };
+    }
+
+    throw new Error(`Unsupported Ent Bot admin action: ${action}`);
+}
+
 function getActionLabel(action, mode) {
     const prefix = `${formatModeLabel(mode)} Core3`;
 
@@ -309,6 +439,12 @@ function getActionLabel(action, mode) {
         return `Capture Crash (${prefix})`;
     case 'shutdown':
         return `Shutdown ${prefix}`;
+    case 'ent-start':
+        return `Start ${formatModeLabel(mode)} Ent Bot`;
+    case 'ent-stop':
+        return `Stop ${formatModeLabel(mode)} Ent Bot`;
+    case 'ent-restart':
+        return `Restart ${formatModeLabel(mode)} Ent Bot`;
     default:
         return `${prefix} Action`;
     }
@@ -319,6 +455,7 @@ module.exports = {
     buildButtonCustomId,
     buildCore3StopConfirmPanel,
     executeCore3AdminPanelAction,
+    executeEntBotAdminPanelAction,
     formatModeLabel,
     getActionLabel,
     normalizePanelMode,

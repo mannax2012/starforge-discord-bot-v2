@@ -52,7 +52,7 @@ module.exports = {
                 '> `/fixchat` - Reconnect the SWG chat relay.',
                 '> `/fixent` - Reconnect the entertainer bot worker.',
                 '> `/debugchat` - Enable verbose SWG chat logging.',
-                `> \`${adminPanelExample}\` - Open the current Core3 admin control panel in DM.`,
+                `> \`${adminPanelExample}\` - Open the current Core3 and Ent Bot admin control panel in DM.`,
                 '> `/activate username:<accountname>` - Activate an account.'
             );
         }

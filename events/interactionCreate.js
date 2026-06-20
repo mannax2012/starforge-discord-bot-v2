@@ -12,6 +12,7 @@ const {
     buildCore3AdminPanel,
     buildCore3StopConfirmPanel,
     executeCore3AdminPanelAction,
+    executeEntBotAdminPanelAction,
     formatModeLabel,
     getActionLabel,
     parseCore3AdminPanelCustomId
@@ -146,6 +147,55 @@ async function executeCore3PanelAction(panelMessage, actorTag, ownerId, mode, ac
     }
 }
 
+async function executeEntBotPanelAction(panelMessage, actorTag, ownerId, mode, action, client) {
+    const actionLabel = getActionLabel(action, mode);
+
+    await panelMessage.edit(
+        buildCore3AdminPanel(ownerId, actorTag, mode, {
+            state: 'working',
+            label: actionLabel
+        })
+    );
+
+    try {
+        const result = await executeEntBotAdminPanelAction(action);
+
+        await panelMessage.edit(
+            buildCore3AdminPanel(ownerId, actorTag, mode, {
+                state: 'done',
+                success: result.success,
+                message: result.message,
+                timestamp: formatPanelTimestamp()
+            })
+        );
+
+        await logToBotChannel(
+            client,
+            `${actorTag} used the ${formatModeLabel(mode)} Ent Bot admin panel: ${actionLabel}. ${result.message}`
+        );
+
+        return result;
+    } catch (error) {
+        console.error(`[Ent Bot Admin Panel] ${actionLabel} failed: ${error.message}`);
+
+        await panelMessage.edit(
+            buildCore3AdminPanel(ownerId, actorTag, mode, {
+                state: 'done',
+                success: false,
+                message: `${actionLabel} failed: ${error.message}`,
+                timestamp: formatPanelTimestamp()
+            })
+        );
+
+        await logToBotChannel(
+            client,
+            `${actorTag} failed to use the ${formatModeLabel(mode)} Ent Bot admin panel for ${actionLabel}: ${error.message}`
+        );
+
+        throw error;
+    }
+}
+
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
@@ -222,6 +272,19 @@ module.exports = {
                     const row = new ActionRowBuilder().addComponents(minutesInput);
                     modal.addComponents(row);
                     await interaction.showModal(modal);
+                    return;
+                }
+
+                if (action === 'ent-start' || action === 'ent-stop' || action === 'ent-restart') {
+                    await interaction.deferUpdate();
+                    await executeEntBotPanelAction(
+                        interaction.message,
+                        interaction.user.tag,
+                        ownerId,
+                        mode,
+                        action,
+                        client
+                    );
                     return;
                 }
 
